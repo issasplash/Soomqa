@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Soomqa</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>Soomqa</h1>
+    <span class="tagline">Airdrop Eligibility Checker</span>
+  </header>
+
+  <section id="add-wallet">
+    <input
+      type="text"
+      id="address-input"
+      placeholder="0x... wallet address"
+      autocomplete="off"
+      spellcheck="false"
+    >
+    <button id="add-button" type="button">Add</button>
+    <p id="add-error" class="error hidden"></p>
+  </section>
+
+  <section id="wallets-section">
+    <div class="section-header">
+      <h2>Wallets</h2>
+      <span id="wallet-count" class="muted">0 / 3</span>
+    </div>
+    <ul id="wallets-list"></ul>
+    <p id="wallets-empty" class="muted">No wallets yet. Add one above to begin.</p>
+  </section>
+
+  <section id="results-section" class="hidden">
+    <div class="section-header">
+      <h2>Eligibility</h2>
+      <button id="refresh-button" type="button" class="link">Refresh</button>
+    </div>
+    <div id="results-list"></div>
+  </section>
+
+  <footer>
+    <a href="#" id="upgrade-link">Upgrade to Pro — unlimited wallets</a>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

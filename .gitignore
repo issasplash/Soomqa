@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+*.log
+
+# Local secrets — copy config.example.js to config.js and fill in your keys
+extension/lib/config.js
+
+# Build artifacts for Chrome Web Store submission
+*.zip
+dist/
