@@ -24,13 +24,35 @@ app.js                   fetchers, state, render, filters, calculator, watchlist
 manifest.webmanifest     PWA manifest — enables Add-to-Home-Screen on iOS/Android
 service-worker.js        minimal SW (cache shell, never cache APIs)
 icons/                   192/512/180 px app icons (purple S on dark bg)
-scripts/check-yields.mjs Alerts + daily digest (--digest flag picks mode)
+scripts/check-yields.mjs   Alerts + daily digest (--digest flag picks mode)
+scripts/check-positions.mjs Portfolio scanner — reads open positions/balances
+                           from Binance, Bybit (read-only API keys via
+                           process.env), and Hyperliquid (public address).
+                           Posts a single consolidated summary to Telegram.
 .github/workflows/
   deploy.yml             GitHub Pages deploy on push to main / claude/* branches
   alerts.yml             5-min cron that runs check-yields.mjs (alert mode)
   digest.yml             daily cron (08:00 UTC) for category top-5 snapshot
+  positions.yml          30-min cron that runs check-positions.mjs
 .nojekyll                tells GitHub Pages this is plain static HTML
 ```
+
+## Security note on the portfolio scanner
+
+`scripts/check-positions.mjs` uses read-only exchange API keys to fetch
+open positions and post a Telegram summary. Three rules to keep this safe:
+
+1. Keys live ONLY in GitHub repo secrets (encrypted, never written to logs).
+2. Keys must be created with READ permissions ONLY — never trading or
+   withdrawal.
+3. The script logs the redaction `<redacted>` for any 32+ char alphanumeric
+   string in error output, so even if a third-party API returns the key
+   back in an error message it won't leak to the workflow log.
+
+Do not add this to `app.js` or any browser-loaded code — the secrets
+would become accessible to any JS on the page (CDN compromise, malicious
+extension, XSS). Position display in the browser uses the public-address
+or manual-tracker paths instead.
 
 ## Calculator
 

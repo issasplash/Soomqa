@@ -40,6 +40,55 @@ GitHub Actions опрашивает источники каждые 5 минут
 | Лендинг стейблов | Aave/Morpho/Spark APR ≥ 8% | 12 часов |
 | Δ-нейтрал | Ethena APR ≥ 15% | 6 часов |
 
+Дополнительно — **ежедневный обзор** в 11:00 МСК с топ-5 yields по каждой категории.
+
+## Портфельный сканер (опционально)
+
+Раз в 30 минут можно получать в Telegram сводку **по всем твоим открытым позициям** на Binance, Bybit и Hyperliquid — балансы, открытые сделки, нереализованный PnL.
+
+### Безопасность
+
+- API ключи лежат **только в GitHub Actions Secrets** (encrypted at rest)
+- Никогда не попадают в браузер, в localStorage, в логи
+- Используются **read-only** ключи — без права торговать или выводить средства
+- Hyperliquid использует **публичный адрес** — никаких ключей вообще не требуется
+
+### Создание read-only ключей
+
+**Binance Futures:**
+1. Зайти в Binance → Profile → API Management → Create API
+2. Включить только **Enable Reading** + **Enable Futures**
+3. **Снять галочки** с Enable Trading, Enable Withdrawals, Permits Universal Transfer
+4. Если просит IP whitelist — можно оставить пустым (read-only ключ безопасен) или указать `Unrestricted`
+5. Сохранить **API Key** и **Secret Key**
+
+**Bybit Unified:**
+1. Bybit → Profile → API → Create New Key
+2. **System-generated key**, **Read-Only**
+3. Permissions: только **Contract → Position** и **Wallet → Account Transfer (Read)**
+4. Никаких Trade или Withdraw
+5. Сохранить **API Key** и **Secret**
+
+**Hyperliquid:** просто скопируй адрес кошелька с которого торгуешь (`0x...`).
+
+### Подключение в GitHub
+
+В **Settings → Secrets and variables → Actions** добавить нужные:
+
+| Secret | Значение |
+|---|---|
+| `BINANCE_API_KEY` | твой read-only ключ Binance |
+| `BINANCE_API_SECRET` | секрет (показывается **только один раз** при создании) |
+| `BYBIT_API_KEY` | read-only ключ Bybit |
+| `BYBIT_API_SECRET` | секрет Bybit |
+| `HYPERLIQUID_ADDRESS` | публичный адрес кошелька |
+| `TELEGRAM_BOT_TOKEN` | (уже настроен для алертов) |
+| `TELEGRAM_CHAT_ID` | (уже настроен) |
+
+Можно настроить **только одну биржу** — остальные просто пропустятся в скане.
+
+После добавления — **Actions → Portfolio scan → Run workflow** для проверки.
+
 ### Настройка Telegram-бота (один раз)
 
 1. **Создать бота:**
