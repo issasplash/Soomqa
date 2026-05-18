@@ -4,41 +4,45 @@ Guidance for Claude when working in this repository.
 
 ## Project
 
-**Soomqa** — personal crypto yield monitor. CLI written in Node.js + TypeScript that pulls funding rates from CEXes and yield APYs from DeFi protocols, normalises them into a single comparable `YieldRow` shape, and prints a sorted table.
+**Soomqa** — personal crypto yield monitor. Single-page web app that pulls funding rates from Binance / Bybit / Hyperliquid and DeFi APYs (Aave, Morpho, Pendle, Ethena, Sky, restaking LRTs via DefiLlama) and renders one comparison table.
 
-Used by **one operator** (the repo owner). Not a SaaS, no auth, no users.
+Used by **one operator** (the repo owner). Not a SaaS, no auth, no users. Mobile-friendly because the operator works from a phone.
 
 ## Stack
 
-- Node.js ≥ 20, ESM modules
-- TypeScript (no build step in dev — `tsx` runs `.ts` directly)
-- No frameworks. `chalk` for colour, `cli-table3` for the table, `dotenv` for env vars.
+- Vanilla HTML / CSS / JavaScript — no build step, no bundler
+- Tailwind via CDN for layout
+- All API calls happen in the browser (every endpoint is CORS-friendly)
+- Deployed via GitHub Pages with a workflow in `.github/workflows/deploy.yml`
 
 ## Repository layout
 
 ```
-src/
-  index.ts             entry point
-  types.ts             shared shapes (YieldRow, FetchResult, YieldCategory)
-  http.ts              fetch wrapper with timeout
-  fetchers/            one file per data source; each exports an async function
-                       returning FetchResult<YieldRow[]>
-  render.ts            CLI table renderer + summary
+index.html            entry — markup, Tailwind CDN, table skeleton
+style.css             dark theme, APR colour scale, category badges
+app.js                everything else (fetchers, state, render, filters)
+.github/workflows/    GitHub Pages deploy (triggers on push to main)
+.nojekyll             tells GitHub Pages this is plain static HTML
 ```
-
-Run with `npm start`. Typecheck with `npm run typecheck`.
 
 ## Conventions
 
-- **Every fetcher is independent.** They never share state. They return `FetchResult<YieldRow[]>` so failures don't crash the whole run — `index.ts` collects partial results and shows what failed.
+- **Every fetcher is independent.** Each `fetchX()` returns `{ ok: true, data: rows[] } | { ok: false, source, error }`. The render loop pushes successful rows into a flat list and surfaces failures in a banner. One broken source never blocks the rest.
 - **Annualisation:** Binance/Bybit funding = rate × 3 × 365 (8h periods). Hyperliquid = rate × 24 × 365 (hourly). DefiLlama already returns APY.
-- **Adding a fetcher:** drop a file in `src/fetchers/`, register in `Promise.all` in `index.ts`. No other wiring needed — the renderer iterates over `YieldRow[]` generically.
-- **No secrets in code.** `.env` is gitignored; `.env.example` documents shape only. Phase 1 needs no keys (all endpoints public).
-- **Sandboxed dev environments may block outbound HTTP.** If `npm start` returns 403s for every source, that's the environment, not the code. Run locally.
+- **Adding a fetcher:** write the function in `app.js`, add it to `Promise.all` in `refreshData()`. No other wiring needed.
+- **No build step.** If you find yourself reaching for a framework or bundler, stop — the constraint is deliberate. The user doesn't run terminals, and a static repo deploys to Pages in seconds.
+- **Mobile first.** The user opens this on a phone. Test layouts under `sm:` breakpoint before adding columns.
 
 ## Non-goals (deliberate)
 
-- No web UI. CLI only. Adds value, not surface area.
-- No bundler / no transpile step. `tsx` is enough.
-- No tests yet. Will add when behaviour stabilises past Phase 2.
-- No persistence yet. Each run is stateless; positions/history land in Phase 4.
+- No backend. No API keys. No accounts.
+- No wallet connection (yet — comes in Phase 4 when we track positions).
+- No frameworks. Plain DOM is enough at this scale.
+- No tests yet. The user-facing signal of correctness is "the table shows numbers that match the exchange UIs"; we lean on that until behaviour stabilises.
+
+## Common gotchas
+
+- Tailwind CDN compiles classes at runtime. If a class doesn't take effect, check spelling — there's no error.
+- DefiLlama returns ~13,000 pools. We filter aggressively in `fetchDefiLlama()`; expanding the project whitelist is the main way we surface more yields.
+- A few exchanges expose delivery futures alongside perps (e.g. `BTCUSDT_240329`). Filter them out by looking for `_` in the symbol.
+- The user is in Russia and uses a phone for most reading. Keep colour contrast high and font sizes legible at narrow widths.

@@ -1,73 +1,71 @@
 # Soomqa
 
-Personal crypto yield monitor. Reads funding rates from Binance / Bybit / Hyperliquid and DeFi yields from Aave / Morpho / Pendle / Ethena / Sky in parallel, then prints a single sorted comparison table.
+Personal crypto yield monitor. Single-page web app that compares funding rates from major exchanges with DeFi APYs in one view. Open in any browser — no terminal, no install, no API keys.
 
-Built for one user (the operator). No SaaS layer, no auth, no clients. Phase 1.
+## Live URL
 
-## What you see when you run it
+After the first push to `main`, GitHub Pages publishes to:
 
 ```
-Soomqa — yield monitor
-
-Fetching from 4 sources in parallel…
-Got 17 yield rows.
-
-┌────────────────────┬──────────────────────┬────────────┬──────────┬──────────┬────────────┐
-│ Source             │ Market               │ Category   │ APR      │ Type     │ Note       │
-├────────────────────┼──────────────────────┼────────────┼──────────┼──────────┼────────────┤
-│ Hyperliquid fund.. │ HYPE-PERP            │ Funding    │  35.41%  │ variable │ hourly...  │
-│ Pendle PT          │ PT-sUSDe (Ethereum)  │ Fixed      │  12.80%  │ fixed    │ yield...   │
-│ Ethena sUSDe       │ sUSDe (Ethereum)     │ Δ-neutral  │  11.20%  │ variable │ packaged.. │
-│ Morpho Blue        │ USDC (Base)          │ Lending    │   7.40%  │ variable │ isolated.. │
-│ ...                │                      │            │          │          │            │
-└────────────────────┴──────────────────────┴────────────┴──────────┴──────────┴────────────┘
-
-Best APR overall: 35.41% (Hyperliquid funding — HYPE-PERP)
-Best fixed yield: 12.80% (Pendle PT — PT-sUSDe)
+https://issasplash.github.io/Soomqa/
 ```
 
-## Setup (on a Mac)
+Open that URL on your phone or laptop. It auto-refreshes every 60 seconds.
 
-```bash
-git clone https://github.com/issasplash/soomqa.git
-cd soomqa
-npm install
-npm start
-```
+## What it shows
 
-That's it. No API keys needed for Phase 1 — every endpoint we hit is public.
+- **All perpetual markets** on Binance, Bybit, and Hyperliquid (~500+ symbols total), with funding rates annualised to APR
+- **DeFi yields** across Aave, Compound, Morpho, Spark, Sky, Pendle, Ethena, EigenLayer, Ether.fi, Renzo, Kelp, Puffer — pulled live from DefiLlama
+- **Sorted by APR**, filterable by symbol, category, or minimum APR
+- **Summary cards**: best overall, best fixed yield, best stable lending, total markets tracked
 
-Re-run `npm start` whenever you want a fresh snapshot. Funding rates refresh every 8 hours on Binance/Bybit and every hour on Hyperliquid; DeFi APYs move on every block.
+All read-only public data. No accounts, no wallet connection.
 
-For continuous monitoring later, run `npm run watch` (re-fetches on file change — useful while we add fetchers).
+## Running locally
 
-## Why this exists
+If you want to open the page directly without waiting for the GitHub Pages deploy:
 
-Funding rates and DeFi yields move in opposite directions. When perps are skewed long, Binance pays you 30% APR to short — but Aave is paying 4%. When the market goes sideways, perps pay nothing but Morpho stables go to 12%. Knowing which layer to be in *right now* requires watching ~7 dashboards at once. This collapses them into one.
+1. Clone the repo on your Mac
+2. Open `index.html` in any browser (just double-click it)
 
-Phase 1 is read-only — it shows you the table. Execution (auto-rebalance, Telegram alerts, position tracking) comes in Phase 2.
+That's it — there's no build step. The page makes the API calls itself.
+
+## Deploying via GitHub Pages
+
+1. Push this repo to `main` on GitHub (or merge the working branch)
+2. Go to **Settings → Pages → Source** and select **GitHub Actions**
+3. The included workflow (`.github/workflows/deploy.yml`) handles the rest
+
+After the first deploy completes (~1 minute), the URL above goes live.
 
 ## Architecture
 
+Single-page app, vanilla JS. No framework, no bundler.
+
 ```
-src/
-  index.ts             entry point — runs all fetchers in parallel, renders the table
-  types.ts             shared YieldRow shape every fetcher returns
-  http.ts              fetch wrapper with timeout
-  fetchers/
-    binance.ts         Binance USD-M futures funding (8h period → APR)
-    bybit.ts           Bybit V5 linear funding (8h period → APR)
-    hyperliquid.ts     Hyperliquid funding (1h period → APR)
-    defillama.ts       Aggregated DeFi yields via DefiLlama /pools API
-  render.ts            CLI table + summary
+index.html          markup, Tailwind via CDN, semantic table layout
+style.css           dark theme, APR colour scale, category badges
+app.js              fetchers + state + render loop
+.github/workflows/  GitHub Pages deploy on push to main
 ```
 
-Adding a new fetcher: drop a file in `src/fetchers/`, implement `() => Promise<FetchResult<YieldRow[]>>`, register it in the `Promise.all` in `src/index.ts`. The table picks it up automatically.
+Adding a new data source: write another `fetchX()` function in `app.js` that returns `{ ok, data: rows[] } | { ok: false, source, error }` and add it to the `Promise.all` in `refreshData()`. The table picks it up automatically.
+
+## Data sources
+
+| Source | Endpoint | Covers |
+|---|---|---|
+| Binance | `fapi.binance.com/fapi/v1/premiumIndex` | All USDT/USDC perp funding rates |
+| Bybit | `api.bybit.com/v5/market/tickers?category=linear` | All linear perp funding rates |
+| Hyperliquid | `api.hyperliquid.xyz/info` | All HL perp funding rates (hourly) |
+| DefiLlama | `yields.llama.fi/pools` | Aave, Morpho, Pendle, Ethena, restaking LRTs, etc. |
+
+All endpoints are public and CORS-friendly. If one source fails, the others still render and the failure is surfaced in a banner.
 
 ## Roadmap
 
-- **Phase 1 (this)** — read-only comparison across CEX funding + DeFi yields
-- **Phase 2** — Pendle Boros (tokenised funding rates as fixed yield), Sky savings rate, restaking points
-- **Phase 3** — Telegram alerts when an APR delta crosses a threshold (e.g. funding > stable yield by >15%)
-- **Phase 4** — wallet/position tracker: input your actual deposits, see realised yield vs theoretical, drift alerts
-- **Phase 5** — sybil-resistant airdrop wallet scheduler (the airdrop layer of the portfolio)
+- **Phase 1** (this) — live read-only comparison across CEX funding + DeFi yields
+- **Phase 2** — Pendle Boros (tokenised funding rates as fixed yield), funding-rate spread arbitrage view (long leg one exchange + short leg another, locked APR)
+- **Phase 3** — Telegram alerts (separate Cloudflare Worker) when APR-delta crosses a threshold
+- **Phase 4** — position tracker: paste your deposits, see realised vs theoretical yield, drift alerts
+- **Phase 5** — airdrop-farming layer: wallet scheduler with sybil-resistant action hygiene

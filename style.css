@@ -1,0 +1,72 @@
+/* Custom styling beyond Tailwind. Keeps the page lightweight. */
+
+html {
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Subtle scrollbar in dark theme */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0f;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a4a;
+}
+
+/* APR colour classes used by app.js */
+.apr-high   { color: #4ade80; }   /* >= 15%      */
+.apr-good   { color: #22d3ee; }   /* >= 8%       */
+.apr-mid    { color: #d4d4d8; }   /* >= 3%       */
+.apr-low    { color: #a1a1aa; }   /* >= 0%       */
+.apr-neg    { color: #f87171; }   /* negative    */
+
+/* Category badges */
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.badge-funding   { background: rgba(124, 92, 255, 0.15); color: #a394ff; }
+.badge-fixed     { background: rgba(244, 114, 182, 0.15); color: #f0abfc; }
+.badge-lending   { background: rgba(34, 211, 238, 0.15); color: #67e8f9; }
+.badge-delta     { background: rgba(34, 197, 94, 0.15);  color: #86efac; }
+.badge-restake   { background: rgba(251, 191, 36, 0.15); color: #fcd34d; }
+.badge-leveraged { background: rgba(248, 113, 113, 0.15); color: #fca5a5; }
+
+/* Smooth row hover */
+tbody tr:hover {
+  background-color: rgba(124, 92, 255, 0.04);
+}
+
+/* Disabled button state — keeps loading state visually distinct */
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Tiny prevention of layout shift while Tailwind JIT loads from CDN */
+#app { min-height: 100vh; }
+
+/* Pulse animation on data refresh */
+@keyframes pulse-once {
+  0% { background-color: rgba(124, 92, 255, 0.15); }
+  100% { background-color: transparent; }
+}
+.refreshed {
+  animation: pulse-once 0.8s ease-out;
+}
