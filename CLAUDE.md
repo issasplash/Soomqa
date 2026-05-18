@@ -18,12 +18,23 @@ Used by **one operator** (the repo owner). Not a SaaS, no auth, no users. Mobile
 ## Repository layout
 
 ```
-index.html            entry — markup, Tailwind CDN, table skeleton
-style.css             dark theme, APR colour scale, category badges
-app.js                everything else (fetchers, state, render, filters)
-.github/workflows/    GitHub Pages deploy (triggers on push to main)
-.nojekyll             tells GitHub Pages this is plain static HTML
+index.html               entry — markup, Tailwind CDN, table skeleton
+style.css                dark theme, APR colour scale, badges, calc panel
+app.js                   fetchers, state, render, filters, calculator
+scripts/check-yields.mjs Node alert script (mirrors app.js fetchers + alert rules)
+.github/workflows/
+  deploy.yml             GitHub Pages deploy on push to main / claude/* branches
+  alerts.yml             5-min cron that runs check-yields.mjs and posts Telegram
+.nojekyll                tells GitHub Pages this is plain static HTML
 ```
+
+## Calculator
+
+Clicking a row in the table expands a panel underneath with a yield calculator
+(amount × APR × time − fees). Inputs are `amount` and `periods` (cycles for
+funding rates, days for everything else). Fees per category are baked into
+`feesForCategory()` in `app.js`. State persists across re-renders via
+`calcStates` Map keyed on `source|market|category`.
 
 ## Conventions
 

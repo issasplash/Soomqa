@@ -1,71 +1,104 @@
 # Soomqa
 
-Personal crypto yield monitor. Single-page web app that compares funding rates from major exchanges with DeFi APYs in one view. Open in any browser — no terminal, no install, no API keys.
+Personal crypto yield monitor — single-page web app that compares CEX funding rates with DeFi APYs in one view, plus a Telegram alert bot that pings you when a yield crosses a threshold. Open in any browser. No terminal, no install, no API keys.
 
 ## Live URL
-
-After the first push to `main`, GitHub Pages publishes to:
 
 ```
 https://issasplash.github.io/Soomqa/
 ```
 
-Open that URL on your phone or laptop. It auto-refreshes every 60 seconds.
+Откроется на телефоне или ноутбуке. Авто-обновление каждые 60 секунд.
 
-## What it shows
+## Что показывает
 
-- **All perpetual markets** on Binance, Bybit, and Hyperliquid (~500+ symbols total), with funding rates annualised to APR
-- **DeFi yields** across Aave, Compound, Morpho, Spark, Sky, Pendle, Ethena, EigenLayer, Ether.fi, Renzo, Kelp, Puffer — pulled live from DefiLlama
-- **Sorted by APR**, filterable by symbol, category, or minimum APR
-- **Summary cards**: best overall, best fixed yield, best stable lending, total markets tracked
+- **Все perp-рынки** на Binance, Bybit и Hyperliquid (~1700 символов) с funding rates пересчитанными в APR
+- **DeFi доходности** с Aave, Morpho, Spark, Sky, Pendle, Ethena, EigenLayer, Ether.fi, Renzo, Kelp, Puffer — через DefiLlama
+- **Умное определение ликвидности**: каждая строка помечена `liquid: true/false` на основе реальных сигналов — 24h volume, open interest, basis (perp vs spot), `apyBase` vs `apyReward`, флаг `outlier` от DefiLlama
+- **Equity perps** (SNDK/CRCL/QQQ/GOOGL и пр.) автоматически детектируются через `underlyingType` в Binance exchangeInfo и не попадают в "лучший в целом"
+- **Поиск, фильтры по категории, мин/макс APR, чекбокс "только ликвидные"** — фильтры сохраняются в localStorage
 
-All read-only public data. No accounts, no wallet connection.
+Все данные read-only публичные. Без аккаунтов, без кошелька, без API-ключей.
 
-## Running locally
+## Telegram-алерты
 
-If you want to open the page directly without waiting for the GitHub Pages deploy:
+GitHub Actions опрашивает источники каждые 5 минут и шлёт сообщения в Telegram при появлении интересных сигналов:
 
-1. Clone the repo on your Mac
-2. Open `index.html` in any browser (just double-click it)
-
-That's it — there's no build step. The page makes the API calls itself.
-
-## Deploying via GitHub Pages
-
-1. Push this repo to `main` on GitHub (or merge the working branch)
-2. Go to **Settings → Pages → Source** and select **GitHub Actions**
-3. The included workflow (`.github/workflows/deploy.yml`) handles the rest
-
-After the first deploy completes (~1 minute), the URL above goes live.
-
-## Architecture
-
-Single-page app, vanilla JS. No framework, no bundler.
-
-```
-index.html          markup, Tailwind via CDN, semantic table layout
-style.css           dark theme, APR colour scale, category badges
-app.js              fetchers + state + render loop
-.github/workflows/  GitHub Pages deploy on push to main
-```
-
-Adding a new data source: write another `fetchX()` function in `app.js` that returns `{ ok, data: rows[] } | { ok: false, source, error }` and add it to the `Promise.all` in `refreshData()`. The table picks it up automatically.
-
-## Data sources
-
-| Source | Endpoint | Covers |
+| Тип сигнала | Порог | Дедупликация |
 |---|---|---|
-| Binance | `fapi.binance.com/fapi/v1/premiumIndex` | All USDT/USDC perp funding rates |
-| Bybit | `api.bybit.com/v5/market/tickers?category=linear` | All linear perp funding rates |
-| Hyperliquid | `api.hyperliquid.xyz/info` | All HL perp funding rates (hourly) |
-| DefiLlama | `yields.llama.fi/pools` | Aave, Morpho, Pendle, Ethena, restaking LRTs, etc. |
+| Funding-спайк | APR ≥ 50% на ликвидном рынке | 4 часа |
+| Фикс. доходность | Pendle PT APR ≥ 15% | 12 часов |
+| Лендинг стейблов | Aave/Morpho/Spark APR ≥ 8% | 12 часов |
+| Δ-нейтрал | Ethena APR ≥ 15% | 6 часов |
 
-All endpoints are public and CORS-friendly. If one source fails, the others still render and the failure is surfaced in a banner.
+### Настройка Telegram-бота (один раз)
+
+1. **Создать бота:**
+   - Открыть [@BotFather](https://t.me/BotFather) в Telegram
+   - `/newbot` → задать имя и username
+   - BotFather пришлёт **token** вида `123456:ABC-DEF...`
+
+2. **Узнать свой chat_id:**
+   - Открыть [@userinfobot](https://t.me/userinfobot) в Telegram
+   - Бот ответит твоим ID — это **chat_id** (число)
+   - Прежде чем бот сможет тебе писать, **отправь /start своему боту** один раз
+
+3. **Положить секреты в GitHub:**
+   - В репозитории: **Settings → Secrets and variables → Actions → New repository secret**
+   - Добавить `TELEGRAM_BOT_TOKEN` (token из шага 1)
+   - Добавить `TELEGRAM_CHAT_ID` (число из шага 2)
+
+4. **Готово.** Workflow запустится автоматически по расписанию. Можно сразу проверить вручную: **Actions → Yield alerts → Run workflow**.
+
+Если секреты не настроены — workflow всё равно будет крутиться (не упадёт), просто ничего не отправит и залогирует "TELEGRAM_BOT_TOKEN not set — skipping".
+
+## Запуск локально (опционально)
+
+```bash
+git clone https://github.com/issasplash/soomqa.git
+cd soomqa
+# Open index.html in any browser — that's it.
+```
+
+Никаких зависимостей не надо ставить. Чтобы запустить alert-скрипт локально:
+
+```bash
+TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... node scripts/check-yields.mjs
+```
+
+(Node 20+ — нужен встроенный `fetch`.)
+
+## Архитектура
+
+```
+index.html               markup, Tailwind CDN, semantic table
+style.css                dark theme, APR colour scale, badges
+app.js                   browser fetchers + state + render
+scripts/
+  check-yields.mjs       same fetchers + alert rules + Telegram sender
+.github/workflows/
+  deploy.yml             GitHub Pages deploy on push to main
+  alerts.yml             5-min cron, runs check-yields.mjs
+```
+
+Vanilla JS, без сборки, без фреймворков, без backend.
+
+## Источники данных
+
+| Источник | Endpoint | Что покрывает |
+|---|---|---|
+| Binance | `fapi.binance.com/fapi/v1/{premiumIndex,ticker/24hr,exchangeInfo}` | Все USDT/USDC perp funding rates + volume + контракт-метаданные |
+| Bybit | `api.bybit.com/v5/market/tickers?category=linear` | Все linear perp funding rates + turnover + OI |
+| Hyperliquid | `api.hyperliquid.xyz/info` (POST) | Все HL perp funding rates + дневной объём + OI + oraclePx |
+| DefiLlama | `yields.llama.fi/pools` | Aave, Morpho, Pendle, Ethena, restaking LRTs, и т.д. |
+
+Все endpoints публичные и CORS-friendly. Если один источник падает — остальные рендерятся, ошибка показывается баннером.
 
 ## Roadmap
 
-- **Phase 1** (this) — live read-only comparison across CEX funding + DeFi yields
-- **Phase 2** — Pendle Boros (tokenised funding rates as fixed yield), funding-rate spread arbitrage view (long leg one exchange + short leg another, locked APR)
-- **Phase 3** — Telegram alerts (separate Cloudflare Worker) when APR-delta crosses a threshold
-- **Phase 4** — position tracker: paste your deposits, see realised vs theoretical yield, drift alerts
-- **Phase 5** — airdrop-farming layer: wallet scheduler with sybil-resistant action hygiene
+- ✅ **Phase 1** — Read-only live comparison across CEX funding + DeFi yields
+- ✅ **Phase 2** — Telegram-алерты на спайки funding / новые DeFi-возможности
+- **Phase 3** — Position tracker: вписываешь свои депозиты, видишь realised vs theoretical yield, drift alerts
+- **Phase 4** — Pendle Boros fetcher (fixed funding rate lock-in)
+- **Phase 5** — Paper trading simulator: бот "пробует" сделки, не трогая реальные деньги, ты видишь как бы он торговал
+- **Phase 6** — Live execution (только после Phase 5 покажет стабильную прибыль, и капитал вырастет до $3K+)

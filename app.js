@@ -385,6 +385,8 @@ const state = {
   failures: [],
   lastUpdated: null,
   filters: loadFilters() ?? { search: "", category: "", minApr: null, maxApr: null, liquidOnly: false, sort: "apr-desc" },
+  visibleRows: [],
+  expandedRowIndex: null,
 };
 
 const els = {
@@ -456,6 +458,177 @@ function applyFilters(rows) {
   return out;
 }
 
+// ─── Yield calculator ─────────────────────────────────────────────────────────
+//
+// Click a row → a panel drops underneath showing how much that yield is worth
+// on a given amount for a given holding period, AFTER realistic fees. Honesty
+// matters here: a 100% APR funding rate held for 1 day on $500 sounds great
+// until you net it against 0.20% round-trip fees (4 trades × ~0.05%).
+
+// Fee model per category. round-trip = open both legs and close both legs.
+function feesForCategory(category, amount) {
+  switch (category) {
+    case "funding-rate":
+      // 4 taker trades × ~0.05% = 0.20% round-trip on a delta-neutral position.
+      return amount * 0.002;
+    case "delta-neutral":
+      // Ethena: ~0.10% in/out via direct mint/redeem.
+      return amount * 0.001;
+    case "fixed-yield":
+      // Pendle: ~0.10% to enter PT, ~0.10% to exit early. If held to maturity,
+      // exit fee is zero (PT settles 1:1). Conservative: 0.10%.
+      return amount * 0.001;
+    case "stable-lending":
+    case "restaking":
+      // No trade fees; gas only, which is ~$1-3 on Base / L2s. Negligible vs
+      // the headline numbers, so we round to 0 in the calculator.
+      return 0;
+    default:
+      return 0;
+  }
+}
+
+function unitLabelForCategory(category) {
+  // What does "1 unit of holding" mean for this row?
+  // Funding rates accrue per funding cycle (8h on Binance/Bybit, 1h on HL).
+  // Everything else: per day.
+  return category === "funding-rate" ? "циклов" : "дней";
+}
+
+function dailyMultiplierForCategory(category, source) {
+  // Convert APR (annualised %) → fraction earned per "unit".
+  if (category === "funding-rate") {
+    const cyclesPerYear = source === "Hyperliquid" ? 24 * 365 : 3 * 365;
+    return 1 / cyclesPerYear;
+  }
+  return 1 / 365;
+}
+
+function renderCalculator(row) {
+  const state = ensureCalcState(row);
+  const amount = Number(state.amount) || 0;
+  const periods = Number(state.periods) || 0;
+  const aprFrac = row.apr / 100;
+  const perUnit = dailyMultiplierForCategory(row.category, row.source);
+  const gross = amount * aprFrac * perUnit * periods;
+  const fees = feesForCategory(row.category, amount);
+  const net = gross - fees;
+  const netClass = net > 0.01 ? "pos" : net < -0.01 ? "neg" : "neutral";
+  const unitLabel = unitLabelForCategory(row.category);
+
+  // Build the formula string — same shape every time, just numbers swap in.
+  const aprStr = `${row.apr.toFixed(2)}%`;
+  const formula = row.category === "funding-rate"
+    ? `gross = $${amount.toFixed(0)} × ${aprStr} ÷ ${row.source === "Hyperliquid" ? "8760" : "1095"} цикл/год × ${periods} цикл = $${gross.toFixed(2)}`
+    : `gross = $${amount.toFixed(0)} × ${aprStr} ÷ 365 дн/год × ${periods} дн = $${gross.toFixed(2)}`;
+
+  return `
+    <div class="calc-panel" data-calc-for="${row._idx}">
+      <div class="calc-field">
+        <label>Сумма (USD)</label>
+        <input type="number" inputmode="decimal" min="1" step="50" data-calc-input="amount" value="${escapeHtml(state.amount)}">
+      </div>
+      <div class="calc-field">
+        <label>${unitLabel}</label>
+        <input type="number" inputmode="decimal" min="0.1" step="1" data-calc-input="periods" value="${escapeHtml(state.periods)}">
+      </div>
+      <div>
+        <div class="calc-result">
+          <span><span class="lbl">gross</span> $${gross.toFixed(2)}</span>
+          <span><span class="lbl">fees</span> −$${fees.toFixed(2)}</span>
+          <span><span class="lbl">net</span> <span class="${netClass}">${net >= 0 ? "" : "−"}$${Math.abs(net).toFixed(2)}</span></span>
+          ${gross > 0 ? `<span class="lbl">${((net / amount) * 100).toFixed(3)}% от капитала</span>` : ""}
+        </div>
+        <div class="calc-formula">${formula} · fees учитывают ${row.category === "funding-rate" ? "4 take-сделки 0.05%" : row.category === "delta-neutral" ? "mint+redeem Ethena" : row.category === "fixed-yield" ? "вход/выход Pendle" : "только gas (≈0)"}</div>
+      </div>
+    </div>
+  `;
+}
+
+const calcStates = new Map();  // row "key" → { amount, periods }
+function calcKey(row) {
+  return `${row.source}|${row.market}|${row.category}`;
+}
+function ensureCalcState(row) {
+  const key = calcKey(row);
+  if (!calcStates.has(key)) {
+    calcStates.set(key, {
+      amount: "500",
+      periods: row.category === "funding-rate" ? "1" : "30",
+    });
+  }
+  return calcStates.get(key);
+}
+
+function wireCalculatorListeners() {
+  // Row click → toggle expansion
+  els.rows.querySelectorAll("tr.data-row").forEach(tr => {
+    tr.addEventListener("click", e => {
+      // Don't toggle when clicking inside an open calc panel
+      if (e.target.closest(".calc-panel")) return;
+      const idx = Number(tr.dataset.rowIndex);
+      state.expandedRowIndex = state.expandedRowIndex === idx ? null : idx;
+      render();
+    });
+  });
+  // Calculator inputs
+  els.rows.querySelectorAll(".calc-panel input[data-calc-input]").forEach(input => {
+    input.addEventListener("input", e => {
+      e.stopPropagation();
+      const panel = input.closest(".calc-panel");
+      const rowIdx = Number(panel.dataset.calcFor);
+      const row = state.visibleRows[rowIdx];
+      if (!row) return;
+      const cstate = ensureCalcState(row);
+      cstate[input.dataset.calcInput] = input.value;
+      // Local re-render of only this panel — full re-render would steal focus
+      // from the input the user is typing in.
+      const newHtml = renderCalculator(row);
+      const wrapper = document.createElement("tbody");
+      wrapper.innerHTML = `<tr class="calc-row"><td colspan="6">${newHtml}</td></tr>`;
+      const newPanel = wrapper.querySelector(".calc-panel");
+      panel.replaceWith(newPanel);
+      // Restore focus + cursor position
+      const which = input.dataset.calcInput;
+      const restored = newPanel.querySelector(`input[data-calc-input="${which}"]`);
+      if (restored) {
+        restored.focus();
+        try { restored.setSelectionRange(input.selectionStart, input.selectionEnd); } catch {}
+      }
+      wireSinglePanel(newPanel);
+    });
+    input.addEventListener("click", e => e.stopPropagation());
+  });
+}
+
+// After we manually swap in a panel (during input typing), re-wire the
+// listeners on the new node so further keystrokes keep working.
+function wireSinglePanel(panel) {
+  panel.querySelectorAll("input[data-calc-input]").forEach(input => {
+    input.addEventListener("input", e => {
+      e.stopPropagation();
+      const rowIdx = Number(panel.dataset.calcFor);
+      const row = state.visibleRows[rowIdx];
+      if (!row) return;
+      const cstate = ensureCalcState(row);
+      cstate[input.dataset.calcInput] = input.value;
+      const newHtml = renderCalculator(row);
+      const wrapper = document.createElement("tbody");
+      wrapper.innerHTML = `<tr class="calc-row"><td colspan="6">${newHtml}</td></tr>`;
+      const newPanel = wrapper.querySelector(".calc-panel");
+      panel.replaceWith(newPanel);
+      const which = input.dataset.calcInput;
+      const restored = newPanel.querySelector(`input[data-calc-input="${which}"]`);
+      if (restored) {
+        restored.focus();
+        try { restored.setSelectionRange(input.selectionStart, input.selectionEnd); } catch {}
+      }
+      wireSinglePanel(newPanel);
+    });
+    input.addEventListener("click", e => e.stopPropagation());
+  });
+}
+
 function render() {
   const filtered = applyFilters(state.rows);
 
@@ -498,15 +671,20 @@ function render() {
   if (filtered.length === 0) {
     els.rows.innerHTML = `<tr><td colspan="6" class="px-3 py-8 text-center text-zinc-500">Под фильтры ничего не подошло.</td></tr>`;
   } else {
-    const html = filtered.slice(0, 500).map(r => {
+    state.visibleRows = filtered.slice(0, 500);
+    // Stamp each row with its visible index so the calc panel can look it up
+    // by data-attribute later.
+    state.visibleRows.forEach((r, i) => { r._idx = i; });
+    const html = state.visibleRows.map((r, i) => {
       const cat = CATEGORY_LABELS[r.category] ?? { label: r.category, badge: "" };
       const colour = aprColourClass(r.apr);
       const rowOpacity = r.liquid === false ? "opacity-70" : "";
       const marketBadge = r.liquid === false
         ? `<span class="ml-1 text-[10px] text-amber-400/70" title="Тонкий рынок — APR быстро меняется">●</span>`
         : "";
+      const expanded = state.expandedRowIndex === i;
       return `
-        <tr class="${rowOpacity}">
+        <tr class="data-row ${rowOpacity} ${expanded ? "expanded" : ""}" data-row-index="${i}">
           <td class="px-3 py-2 text-zinc-300">${escapeHtml(r.source)}</td>
           <td class="px-3 py-2 font-mono text-xs text-zinc-100">${escapeHtml(r.market)}${r.quote ? `<span class="text-zinc-500">/${escapeHtml(r.quote)}</span>` : ""}${marketBadge}</td>
           <td class="px-3 py-2 hidden sm:table-cell"><span class="badge ${cat.badge}">${cat.label}</span></td>
@@ -514,6 +692,7 @@ function render() {
           <td class="px-3 py-2 hidden md:table-cell text-zinc-400 text-xs">${r.fixed ? "фикс" : "плав"}</td>
           <td class="px-3 py-2 hidden lg:table-cell text-zinc-500 text-xs">${escapeHtml(r.note ?? "")}</td>
         </tr>
+        ${expanded ? `<tr class="calc-row"><td colspan="6">${renderCalculator(r)}</td></tr>` : ""}
       `;
     }).join("");
     els.rows.innerHTML = html;
@@ -521,6 +700,7 @@ function render() {
       els.rows.insertAdjacentHTML("beforeend",
         `<tr><td colspan="6" class="px-3 py-3 text-center text-zinc-500 text-xs">Показано 500 из ${filtered.length} — уточните фильтр, чтобы увидеть больше.</td></tr>`);
     }
+    wireCalculatorListeners();
   }
 
   // Errors panel

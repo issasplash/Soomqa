@@ -1,0 +1,48 @@
+# Runs the alert script every 15 minutes. State (which alerts have been sent
+# recently) persists in scripts/.cache via actions/cache so the same signal
+# doesn't spam the chat. Needs two repo secrets — see README.
+
+name: Yield alerts
+
+on:
+  schedule:
+    # 5-minute cadence — practical minimum on GitHub Actions runners (they
+    # queue under load and a tighter cron just gets skipped). Hyperliquid
+    # (hourly funding) is the fastest-moving source we cover, so this gives
+    # ~12 polls per funding cycle. Funding on Binance/Bybit refreshes every
+    # 8h, so 5-min polling there is just for spike-onset detection.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Persist dedup cache between runs. Key uses today's date so the cache
+      # gets refreshed daily — a long-running mute on the same alert is OK.
+      - name: Restore alert cache
+        uses: actions/cache@v4
+        with:
+          path: scripts/.cache
+          key: alerts-cache-${{ github.run_id }}
+          restore-keys: |
+            alerts-cache-
+
+      - name: Run alert script
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node scripts/check-yields.mjs
