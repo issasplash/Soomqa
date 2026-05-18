@@ -1,0 +1,25 @@
+{
+  "name": "soomqa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal crypto yield monitor — compares funding rates, fixed yields, and stablecoin lending APYs across CEX and DeFi in real time.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "watch": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.5",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
