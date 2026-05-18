@@ -974,7 +974,7 @@ async function fetchDefiLlamaHistory(row, periodDays) {
 // On mobile this picks up touchmove naturally; on desktop, mousemove.
 
 const SPARK_W = 320;
-const SPARK_H = 70;
+const SPARK_H = 140;  // doubled from 70 so trends are readable on mobile
 
 function renderSparkline(points) {
   if (!points || points.length < 2) {
@@ -1005,9 +1005,9 @@ function renderSparkline(points) {
         ${zeroVisible ? `<line x1="0" x2="${SPARK_W}" y1="${zeroY}" y2="${zeroY}" class="spark-zero"/>` : ""}
         <path d="${fillPath}" class="spark-fill"/>
         <path d="${path}" class="spark-line"/>
-        <circle cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="3" class="${lastClass}"/>
+        <circle cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="4" class="${lastClass}"/>
         <line x1="0" x2="0" y1="0" y2="${SPARK_H}" class="spark-hover-line" style="display:none"/>
-        <circle r="4" class="spark-hover-marker" style="display:none"/>
+        <circle r="6" class="spark-hover-marker" style="display:none"/>
         <!-- Transparent overlay catches pointer events across the whole canvas.
              Without this, iOS Safari only fires events when the finger lands
              on the actual line/path pixel, which is unusable on a 1.8px line. -->
