@@ -395,6 +395,171 @@ const state = {
   previousApr: new Map(),
 };
 
+// ─── Positions (Phase 3: track what you actually deposited) ──────────────────
+//
+// A position is a snapshot: user clicks "Добавить как позицию" in a row's
+// calculator, we record (rowKey, amount, apr_at_open, opened_at) into
+// localStorage. The positions panel at the top of the page then projects how
+// much that position has earned since opening, using a simple linear model:
+//
+//   earned ≈ amount × apr_at_open × (days_held / 365)
+//
+// Caveats acknowledged in the UI: this is an estimate. Real value depends on
+// compound vs simple accrual, actual exit fees, depeg events, and the live
+// APR (which may diverge from the snapshot). The user should periodically
+// verify against the protocol/exchange UI. The tracker exists to give
+// directionally correct intuition, not bookkeeping accuracy.
+
+const POSITIONS_KEY = "soomqa.positions.v1";
+
+function loadPositions() {
+  try {
+    const raw = localStorage.getItem(POSITIONS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+function savePositions() {
+  try { localStorage.setItem(POSITIONS_KEY, JSON.stringify(positions)); } catch {}
+}
+const positions = loadPositions();
+
+function addPosition(row, amount) {
+  const id = `${rowKey(row)}|${Date.now()}`;
+  positions.push({
+    id,
+    rowKey: rowKey(row),
+    source: row.source,
+    market: row.market,
+    quote: row.quote ?? "",
+    category: row.category,
+    fixed: !!row.fixed,
+    amount: Number(amount),
+    aprAtOpen: Number(row.apr),
+    openedAt: Date.now(),
+  });
+  savePositions();
+  renderPositions();
+}
+function removePosition(id) {
+  const idx = positions.findIndex(p => p.id === id);
+  if (idx >= 0) {
+    positions.splice(idx, 1);
+    savePositions();
+    renderPositions();
+  }
+}
+
+// Current APR for a position — looked up from live data by rowKey. Falls back
+// to the at-open APR if the matching row isn't in the current snapshot
+// (e.g. a Pendle PT that's no longer on the leaderboard).
+function currentAprForPosition(p) {
+  const live = state.rows.find(r => rowKey(r) === p.rowKey);
+  return live ? live.apr : null;
+}
+
+function projectedEarned(p) {
+  const now = Date.now();
+  const days = Math.max(0, (now - p.openedAt) / (1000 * 60 * 60 * 24));
+  return p.amount * (p.aprAtOpen / 100) * (days / 365);
+}
+
+function renderPositions() {
+  const section = document.getElementById("positions");
+  const list = document.getElementById("positions-list");
+  const summary = document.getElementById("positions-summary");
+  if (!section || !list || !summary) return;
+
+  if (positions.length === 0) {
+    section.classList.add("hidden");
+    list.innerHTML = "";
+    summary.textContent = "";
+    return;
+  }
+  section.classList.remove("hidden");
+
+  let totalInvested = 0;
+  let totalEarned = 0;
+  let weightedAprSum = 0;
+
+  list.innerHTML = positions.map(p => {
+    const earned = projectedEarned(p);
+    const value = p.amount + earned;
+    const currentApr = currentAprForPosition(p);
+    const aprDelta = currentApr != null ? currentApr - p.aprAtOpen : null;
+    const daysHeld = Math.max(0, (Date.now() - p.openedAt) / (1000 * 60 * 60 * 24));
+    const cat = CATEGORY_LABELS[p.category] ?? { label: p.category, badge: "" };
+
+    totalInvested += p.amount;
+    totalEarned += earned;
+    weightedAprSum += p.amount * p.aprAtOpen;
+
+    let aprDeltaHtml = "";
+    if (aprDelta != null) {
+      if (Math.abs(aprDelta) < 0.05) {
+        aprDeltaHtml = `<span class="pos-apr-flat">≈ без изменений</span>`;
+      } else if (aprDelta > 0) {
+        aprDeltaHtml = `<span class="pos-apr-up">▲ +${aprDelta.toFixed(2)}%</span>`;
+      } else {
+        aprDeltaHtml = `<span class="pos-apr-down">▼ ${aprDelta.toFixed(2)}%</span>`;
+      }
+    } else {
+      aprDeltaHtml = `<span class="pos-apr-flat">нет live данных</span>`;
+    }
+
+    return `
+      <div class="position-card">
+        <div class="position-header">
+          <div>
+            <div class="position-title">${escapeHtml(p.source)} · <span class="position-market">${escapeHtml(p.market)}${p.quote ? "/" + escapeHtml(p.quote) : ""}</span></div>
+            <div class="position-meta"><span class="badge ${cat.badge}">${cat.label}</span> · ${daysHeld.toFixed(1)} дн в позиции</div>
+          </div>
+          <button class="position-remove" data-remove-id="${escapeHtml(p.id)}" aria-label="Удалить позицию">✕</button>
+        </div>
+        <div class="position-body">
+          <div class="position-row">
+            <span class="lbl">Вложено</span>
+            <span class="val">$${p.amount.toFixed(2)}</span>
+          </div>
+          <div class="position-row">
+            <span class="lbl">Заработано (оценка)</span>
+            <span class="val ${earned >= 0 ? "pos" : "neg"}">${earned >= 0 ? "+" : "−"}$${Math.abs(earned).toFixed(2)}</span>
+          </div>
+          <div class="position-row">
+            <span class="lbl">Текущая стоимость</span>
+            <span class="val"><b>$${value.toFixed(2)}</b></span>
+          </div>
+          <div class="position-row">
+            <span class="lbl">APR при входе</span>
+            <span class="val">${p.aprAtOpen.toFixed(2)}%${currentApr != null ? ` <span class="dim">→ ${currentApr.toFixed(2)}%</span>` : ""} ${aprDeltaHtml}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const totalValue = totalInvested + totalEarned;
+  const weightedApr = totalInvested > 0 ? weightedAprSum / totalInvested : 0;
+  summary.innerHTML = `
+    <span>Всего: <b class="text-zinc-200">$${totalValue.toFixed(2)}</b></span>
+    <span class="ml-3">Заработано: <b class="${totalEarned >= 0 ? "text-emerald-400" : "text-rose-400"}">${totalEarned >= 0 ? "+" : "−"}$${Math.abs(totalEarned).toFixed(2)}</b></span>
+    <span class="ml-3">Средн. APR: <b class="text-zinc-200">${weightedApr.toFixed(2)}%</b></span>
+  `;
+
+  // Wire delete buttons
+  list.querySelectorAll(".position-remove").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const id = btn.dataset.removeId;
+      if (!id) return;
+      if (confirm("Удалить эту позицию из трекера?")) removePosition(id);
+    });
+  });
+}
+
 // ─── Watchlist (separate storage so user can clear filters without losing stars) ─
 
 const WATCHLIST_KEY = "soomqa.watchlist.v1";
@@ -843,6 +1008,10 @@ function renderSparkline(points) {
         <circle cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="3" class="${lastClass}"/>
         <line x1="0" x2="0" y1="0" y2="${SPARK_H}" class="spark-hover-line" style="display:none"/>
         <circle r="4" class="spark-hover-marker" style="display:none"/>
+        <!-- Transparent overlay catches pointer events across the whole canvas.
+             Without this, iOS Safari only fires events when the finger lands
+             on the actual line/path pixel, which is unusable on a 1.8px line. -->
+        <rect x="0" y="0" width="${SPARK_W}" height="${SPARK_H}" class="spark-hover-area"/>
       </svg>
       <div class="sparkline-tooltip" style="display:none"></div>
     </div>
@@ -899,15 +1068,32 @@ function attachSparklineHover(wrap, points) {
     tooltip.style.display = "none";
   }
 
-  svg.addEventListener("mousemove", e => handleAt(e.clientX));
-  svg.addEventListener("mouseleave", clear);
-  svg.addEventListener("touchstart", e => {
-    if (e.touches.length > 0) handleAt(e.touches[0].clientX);
-  }, { passive: true });
-  svg.addEventListener("touchmove", e => {
-    if (e.touches.length > 0) handleAt(e.touches[0].clientX);
-  }, { passive: true });
-  svg.addEventListener("touchend", clear);
+  // Pointer events unify mouse and touch on modern browsers (including iOS
+  // Safari ≥13). pointerdown captures the pointer so subsequent moves keep
+  // firing on the SVG even if the finger drifts a few pixels off.
+  let tracking = false;
+  function onDown(e) {
+    tracking = true;
+    handleAt(e.clientX);
+    try { svg.setPointerCapture(e.pointerId); } catch {}
+  }
+  function onMove(e) {
+    if (e.pointerType === "mouse" || tracking) handleAt(e.clientX);
+  }
+  function onUp(e) {
+    tracking = false;
+    try { svg.releasePointerCapture(e.pointerId); } catch {}
+    // Keep tooltip visible briefly after release on touch so the user can
+    // read the value. On mouse, leave handler clears it immediately.
+    if (e.pointerType !== "mouse") setTimeout(clear, 1500);
+  }
+  svg.addEventListener("pointerdown", onDown);
+  svg.addEventListener("pointermove", onMove);
+  svg.addEventListener("pointerup", onUp);
+  svg.addEventListener("pointercancel", onUp);
+  svg.addEventListener("pointerleave", e => {
+    if (e.pointerType === "mouse") clear();
+  });
 }
 
 function formatTooltip(point) {
@@ -1225,6 +1411,7 @@ function renderCalculator(row) {
           <span class="calc-summary-label">APR:</span> <b>${row.apr.toFixed(2)}%</b>
           <span class="calc-summary-label">·  Fees входа/выхода:</span> <b>$${fees.toFixed(2)}</b>
         </div>
+        <button class="position-add-btn" data-add-position="${row._idx}" type="button">+ В позиции</button>
       </div>
       <div class="calc-table-wrap">
         <table class="calc-table">
@@ -1356,6 +1543,30 @@ function wireCalculatorListeners() {
       if (!r) return;
       toggleWatched(r);
       render();
+    });
+  });
+  // "+ В позиции" button — captures the current calculator amount into a
+  // persistent position record. Stops click propagation so the row doesn't
+  // collapse the calculator panel we're standing inside.
+  els.rows.querySelectorAll(".position-add-btn").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const idx = Number(btn.dataset.addPosition);
+      const r = state.visibleRows[idx];
+      if (!r) return;
+      const cstate = ensureCalcState(r);
+      const amount = Math.max(0, Number(cstate.amount) || 0);
+      if (amount <= 0) {
+        alert("Введите сумму больше нуля, чтобы добавить позицию.");
+        return;
+      }
+      addPosition(r, amount);
+      btn.textContent = "✓ Добавлено";
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.textContent = "+ В позиции";
+        btn.disabled = false;
+      }, 1500);
     });
   });
   els.rows.querySelectorAll(".calc-panel input[data-calc-input]").forEach(input => {
@@ -1665,6 +1876,17 @@ setInterval(() => {
   if (state.lastUpdated) els.lastUpdated.textContent = `Обновлено ${formatRelativeTime(state.lastUpdated)}`;
 }, 5000);
 
+// Initial render of persisted positions (so the panel shows even before the
+// first fetch completes — APR delta needs live data but invested amount and
+// estimated earned only need the stored timestamp).
+renderPositions();
+
 // Initial fetch + periodic refresh
-refreshData();
+refreshData().then(renderPositions);  // re-render positions once we have live APRs
 startRefreshTimer();
+
+// Also re-render positions on every periodic refresh so the "current APR"
+// column updates.
+setInterval(() => {
+  if (positions.length > 0) renderPositions();
+}, REFRESH_MS);

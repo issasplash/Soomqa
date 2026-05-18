@@ -243,13 +243,24 @@ tbody tr.data-row.expanded {
 }
 .sparkline-wrap {
   position: relative;
-  touch-action: pan-y;  /* let vertical scrolling work; we handle horizontal */
 }
 .sparkline {
   width: 100%;
   height: 70px;
   display: block;
   cursor: crosshair;
+  /* touch-action: none on the canvas itself stops iOS from intercepting
+     horizontal drags as back-gestures; vertical page scroll still works
+     because it starts outside the SVG. */
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Transparent overlay that actually catches pointer events */
+.spark-hover-area {
+  fill: transparent;
+  pointer-events: all;
 }
 .spark-line { fill: none; stroke: #7c5cff; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
 .spark-fill { fill: rgba(124, 92, 255, 0.12); stroke: none; }
@@ -374,6 +385,79 @@ tbody tr.data-row.expanded {
 .rec-list li {
   line-height: 1.4;
 }
+
+/* "+ В позиции" button in calculator */
+.position-add-btn {
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  color: #4ade80;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: auto;
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+}
+.position-add-btn:hover { background: rgba(74, 222, 128, 0.20); }
+.position-add-btn:disabled { opacity: 0.7; cursor: default; }
+
+/* Position cards */
+.position-card {
+  background: #1a1a24;
+  border: 1px solid #252533;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.position-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 8px;
+}
+.position-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e6e8ee;
+  font-family: ui-monospace, monospace;
+}
+.position-market { color: #fff; }
+.position-meta { font-size: 11px; color: #8a92a6; margin-top: 3px; }
+.position-remove {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+.position-remove:hover { color: #f87171; }
+
+.position-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.position-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.position-row .lbl { color: #8a92a6; font-size: 11px; }
+.position-row .val { color: #d4d4d8; }
+.position-row .val.pos { color: #4ade80; }
+.position-row .val.neg { color: #f87171; }
+.position-row .val b { color: #fff; }
+.position-row .val .dim { color: #6b7280; }
+.pos-apr-up   { color: #4ade80; margin-left: 6px; font-size: 11px; }
+.pos-apr-down { color: #f87171; margin-left: 6px; font-size: 11px; }
+.pos-apr-flat { color: #8a92a6; margin-left: 6px; font-size: 11px; }
 
 /* Disabled button state — keeps loading state visually distinct */
 button:disabled {

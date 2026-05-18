@@ -47,6 +47,15 @@
       </div>
     </header>
 
+    <!-- My positions (hidden until user adds first position) -->
+    <section id="positions" class="hidden mb-6">
+      <div class="flex items-end justify-between mb-2">
+        <h2 class="text-sm uppercase tracking-wide text-zinc-400 font-medium">📊 Мои позиции</h2>
+        <div id="positions-summary" class="text-xs text-zinc-500"></div>
+      </div>
+      <div id="positions-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+    </section>
+
     <!-- Summary cards -->
     <section id="summary" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       <div class="bg-bg-card border border-border rounded-lg p-3">
