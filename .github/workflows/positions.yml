@@ -45,6 +45,14 @@ jobs:
           OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
           OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
           OKX_PASSPHRASE: ${{ secrets.OKX_PASSPHRASE }}
+          BINGX_API_KEY: ${{ secrets.BINGX_API_KEY }}
+          BINGX_API_SECRET: ${{ secrets.BINGX_API_SECRET }}
+          MEXC_API_KEY: ${{ secrets.MEXC_API_KEY }}
+          MEXC_API_SECRET: ${{ secrets.MEXC_API_SECRET }}
+          GATE_API_KEY: ${{ secrets.GATE_API_KEY }}
+          GATE_API_SECRET: ${{ secrets.GATE_API_SECRET }}
+          HTX_API_KEY: ${{ secrets.HTX_API_KEY }}
+          HTX_API_SECRET: ${{ secrets.HTX_API_SECRET }}
           HYPERLIQUID_ADDRESS: ${{ secrets.HYPERLIQUID_ADDRESS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

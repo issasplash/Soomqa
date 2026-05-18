@@ -255,6 +255,234 @@ async function fetchOkx() {
   }
 }
 
+// ─── BingX (read-only API key) ────────────────────────────────────────────────
+
+async function fetchBingX() {
+  const apiKey = process.env.BINGX_API_KEY;
+  const apiSecret = process.env.BINGX_API_SECRET;
+  if (!apiKey || !apiSecret) return null;
+
+  async function call(path) {
+    const ts = Date.now();
+    const query = `timestamp=${ts}`;
+    const sig = crypto.createHmac("sha256", apiSecret).update(query).digest("hex");
+    const url = `https://open-api.bingx.com${path}?${query}&signature=${sig}`;
+    return getJson(url, { headers: { "X-BX-APIKEY": apiKey } });
+  }
+
+  try {
+    const [positionsResp, balanceResp] = await Promise.all([
+      call("/openApi/swap/v2/user/positions"),
+      call("/openApi/swap/v2/user/balance"),
+    ]);
+
+    const positions = positionsResp?.data ?? [];
+    const open = positions
+      .filter(p => Math.abs(Number(p.positionAmt ?? 0)) > 0)
+      .map(p => ({
+        symbol: p.symbol,
+        side: p.positionSide === "LONG" ? "LONG" : "SHORT",
+        size: Math.abs(Number(p.positionAmt ?? 0)),
+        entryPrice: Number(p.avgPrice ?? 0),
+        markPrice: Number(p.markPrice ?? 0),
+        unrealizedPnl: Number(p.unrealizedProfit ?? 0),
+        leverage: Number(p.leverage ?? 1),
+        notional: Math.abs(Number(p.positionValue ?? 0)),
+      }));
+
+    const bal = balanceResp?.data?.balance ?? balanceResp?.data ?? {};
+    const wallet = Number(bal.balance ?? bal.equity ?? 0);
+    return {
+      source: "BingX",
+      walletBalance: wallet,
+      marginBalance: Number(bal.equity ?? wallet),
+      unrealizedPnl: open.reduce((s, p) => s + p.unrealizedPnl, 0),
+      open,
+    };
+  } catch (err) {
+    return { source: "BingX", error: err.message };
+  }
+}
+
+// ─── MEXC Contract (read-only API key) ────────────────────────────────────────
+
+async function fetchMexc() {
+  const apiKey = process.env.MEXC_API_KEY;
+  const apiSecret = process.env.MEXC_API_SECRET;
+  if (!apiKey || !apiSecret) return null;
+
+  async function call(path) {
+    const ts = Date.now();
+    // GET-with-no-params signing: apiKey + timestamp (empty query string).
+    const payload = `${apiKey}${ts}`;
+    const sig = crypto.createHmac("sha256", apiSecret).update(payload).digest("hex");
+    return getJson(`https://contract.mexc.com${path}`, {
+      headers: {
+        "ApiKey": apiKey,
+        "Request-Time": String(ts),
+        "Signature": sig,
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  try {
+    const [positionsResp, assetsResp] = await Promise.all([
+      call("/api/v1/private/position/open_positions"),
+      call("/api/v1/private/account/assets"),
+    ]);
+
+    const positions = positionsResp?.data ?? [];
+    const open = positions.map(p => ({
+      symbol: p.symbol,
+      side: p.positionType === 1 ? "LONG" : "SHORT",
+      size: Math.abs(Number(p.holdVol ?? 0)),
+      entryPrice: Number(p.holdAvgPrice ?? 0),
+      markPrice: Number(p.markPrice ?? p.fairPrice ?? 0),
+      unrealizedPnl: Number(p.unrealizedPnl ?? 0),
+      leverage: Number(p.leverage ?? 1),
+      notional: Math.abs(Number(p.holdVol ?? 0)) * Number(p.markPrice ?? p.holdAvgPrice ?? 0),
+    }));
+
+    const usdtAsset = (assetsResp?.data ?? []).find(a => a.currency === "USDT") ?? {};
+    return {
+      source: "MEXC",
+      walletBalance: Number(usdtAsset.equity ?? usdtAsset.availableBalance ?? 0),
+      marginBalance: Number(usdtAsset.equity ?? 0),
+      unrealizedPnl: open.reduce((s, p) => s + p.unrealizedPnl, 0),
+      open,
+    };
+  } catch (err) {
+    return { source: "MEXC", error: err.message };
+  }
+}
+
+// ─── Gate.io futures (USDT-margined, read-only API key) ───────────────────────
+
+async function fetchGate() {
+  const apiKey = process.env.GATE_API_KEY;
+  const apiSecret = process.env.GATE_API_SECRET;
+  if (!apiKey || !apiSecret) return null;
+
+  function sign(method, path, query = "", body = "") {
+    const ts = Math.floor(Date.now() / 1000);
+    const bodyHash = crypto.createHash("sha512").update(body).digest("hex");
+    const payload = [method, path, query, bodyHash, String(ts)].join("\n");
+    const signature = crypto.createHmac("sha512", apiSecret).update(payload).digest("hex");
+    return { ts, signature };
+  }
+  async function call(method, path) {
+    const { ts, signature } = sign(method, path);
+    return getJson(`https://api.gateio.ws${path}`, {
+      method,
+      headers: {
+        "KEY": apiKey,
+        "Timestamp": String(ts),
+        "SIGN": signature,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  try {
+    const [positions, accounts] = await Promise.all([
+      call("GET", "/api/v4/futures/usdt/positions"),
+      call("GET", "/api/v4/futures/usdt/accounts"),
+    ]);
+
+    const open = (Array.isArray(positions) ? positions : [])
+      .filter(p => Number(p.size ?? 0) !== 0)
+      .map(p => ({
+        symbol: p.contract,
+        side: Number(p.size) > 0 ? "LONG" : "SHORT",
+        size: Math.abs(Number(p.size ?? 0)),
+        entryPrice: Number(p.entry_price ?? 0),
+        markPrice: Number(p.mark_price ?? 0),
+        unrealizedPnl: Number(p.unrealised_pnl ?? 0),
+        leverage: Number(p.leverage ?? 1),
+        notional: Math.abs(Number(p.value ?? 0)),
+      }));
+
+    return {
+      source: "Gate.io",
+      walletBalance: Number(accounts?.total ?? accounts?.available ?? 0),
+      marginBalance: Number(accounts?.total ?? 0),
+      unrealizedPnl: open.reduce((s, p) => s + p.unrealizedPnl, 0),
+      open,
+    };
+  } catch (err) {
+    return { source: "Gate.io", error: err.message };
+  }
+}
+
+// ─── HTX linear swaps (USDT cross-margin, read-only API key) ──────────────────
+
+async function fetchHtx() {
+  const apiKey = process.env.HTX_API_KEY;
+  const apiSecret = process.env.HTX_API_SECRET;
+  if (!apiKey || !apiSecret) return null;
+
+  // HTX/Huobi-style signing — alphabetised query, base64 HMAC over
+  // method + host + path + sorted_query.
+  function buildSignedUrl(method, host, path, params = {}) {
+    const allParams = {
+      AccessKeyId: apiKey,
+      SignatureMethod: "HmacSHA256",
+      SignatureVersion: "2",
+      // Timestamp must be UTC, second precision, no millis.
+      Timestamp: new Date().toISOString().replace(/\.\d+Z$/, ""),
+      ...params,
+    };
+    const sortedQuery = Object.keys(allParams)
+      .sort()
+      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(allParams[k])}`)
+      .join("&");
+    const payload = [method.toUpperCase(), host, path, sortedQuery].join("\n");
+    const signature = crypto.createHmac("sha256", apiSecret).update(payload).digest("base64");
+    return `https://${host}${path}?${sortedQuery}&Signature=${encodeURIComponent(signature)}`;
+  }
+
+  async function postCall(path) {
+    const url = buildSignedUrl("POST", "api.hbdm.com", path);
+    return getJson(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  }
+
+  try {
+    const [positionsResp, accountResp] = await Promise.all([
+      postCall("/linear-swap-api/v1/swap_cross_position_info"),
+      postCall("/linear-swap-api/v1/swap_cross_account_info"),
+    ]);
+
+    const positions = positionsResp?.data ?? [];
+    const open = positions.map(p => ({
+      symbol: p.contract_code,
+      side: p.direction === "buy" ? "LONG" : "SHORT",
+      size: Math.abs(Number(p.volume ?? 0)),
+      entryPrice: Number(p.cost_open ?? p.cost_hold ?? 0),
+      markPrice: Number(p.last_price ?? 0),
+      unrealizedPnl: Number(p.profit_unreal ?? 0),
+      leverage: Number(p.lever_rate ?? 1),
+      notional: Math.abs(Number(p.position_margin ?? 0)) * Number(p.lever_rate ?? 1),
+    }));
+
+    const account = (accountResp?.data ?? []).find(a => a.margin_asset === "USDT") ?? {};
+    return {
+      source: "HTX",
+      walletBalance: Number(account.margin_balance ?? 0),
+      marginBalance: Number(account.margin_balance ?? 0),
+      unrealizedPnl: open.reduce((s, p) => s + p.unrealizedPnl, 0),
+      open,
+    };
+  } catch (err) {
+    return { source: "HTX", error: err.message };
+  }
+}
+
 // ─── Format message ───────────────────────────────────────────────────────────
 
 function formatExchangeBlock(snap) {
@@ -300,6 +528,10 @@ async function main() {
     fetchBinance(),
     fetchBybit(),
     fetchOkx(),
+    fetchBingX(),
+    fetchMexc(),
+    fetchGate(),
+    fetchHtx(),
     fetchHyperliquid(),
   ])).filter(Boolean);
 
