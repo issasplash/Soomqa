@@ -1,0 +1,30 @@
+# Daily digest — fires once at 08:00 UTC (11:00 MSK). Posts a snapshot of
+# top yields per category to Telegram, regardless of whether anything is
+# "spiking". The point is a daily anchor so the user has a habitual touch
+# point even on quiet market days.
+
+name: Daily digest
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Send daily digest
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node scripts/check-yields.mjs --digest

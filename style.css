@@ -143,6 +143,62 @@ tbody tr.data-row.expanded {
 }
 .calc-warning { color: #fbbf24; }
 
+/* APR change arrows */
+.apr-up   { color: #4ade80; font-size: 9px; margin-right: 4px; vertical-align: middle; }
+.apr-down { color: #f87171; font-size: 9px; margin-right: 4px; vertical-align: middle; }
+
+/* Star button (watchlist toggle) */
+.star-btn {
+  background: none;
+  border: none;
+  color: #4a4a55;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 6px 0 0;
+  margin: 0;
+  line-height: 1;
+}
+.star-btn:hover { color: #fbbf24; }
+.star-btn.star-on { color: #fbbf24; }
+
+/* Baseline comparison block in calculator */
+.calc-comparison {
+  border-top: 1px solid #252533;
+  padding-top: 10px;
+  margin-top: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.calc-comparison-label { color: #8a92a6; font-size: 11px; }
+.calc-comparison-label b { color: #d4d4d8; }
+.calc-comparison-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.calc-comparison-pill {
+  background: rgba(124, 92, 255, 0.15);
+  color: #c4b9ff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.calc-comparison-pill.calc-comparison-base {
+  background: rgba(34, 211, 238, 0.12);
+  color: #a5e8f3;
+}
+.calc-comparison-amt { font-weight: 500; }
+.calc-comparison-amt.pos { color: #4ade80; }
+.calc-comparison-amt.neg { color: #f87171; }
+.calc-comparison-verdict { font-size: 11px; margin-top: 2px; }
+.calc-comparison-positive { color: #4ade80; }
+.calc-comparison-negative { color: #f87171; }
+.calc-comparison-neutral  { color: #a1a1aa; }
+
 /* Disabled button state — keeps loading state visually distinct */
 button:disabled {
   opacity: 0.6;

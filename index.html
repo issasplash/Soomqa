@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0a0a0f" />
   <title>Soomqa — Монитор доходностей</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Soomqa" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -105,6 +110,10 @@
             <input id="liquid-only" type="checkbox" class="accent-accent" />
             <span>только ликвидные</span>
           </label>
+          <label class="flex items-center gap-2 text-xs text-zinc-400 px-2 cursor-pointer">
+            <input id="watchlist-only" type="checkbox" class="accent-accent" />
+            <span>★ избранные</span>
+          </label>
         </div>
       </div>
     </section>
@@ -144,5 +153,13 @@
   </div>
 
   <script src="app.js" defer></script>
+  <script>
+    // Register service worker for PWA / home-screen install.
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>

@@ -290,18 +290,22 @@ function formatAlertBlock(rule, rows) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-async function main() {
-  console.log("Fetching…");
+async function fetchAll() {
   const results = await Promise.all([
     fetchBinance(), fetchBybit(), fetchHyperliquid(), fetchDefiLlama(),
   ]);
-
   const rows = [];
   const failures = [];
   for (const r of results) {
     if (r.ok) rows.push(...r.data);
     else failures.push(r);
   }
+  return { rows, failures };
+}
+
+async function runAlerts() {
+  console.log("Fetching for alerts…");
+  const { rows, failures } = await fetchAll();
   console.log(`Got ${rows.length} rows; failures: ${failures.length}`);
   for (const f of failures) console.warn(`  ${f.source}: ${f.error}`);
 
@@ -323,7 +327,6 @@ async function main() {
     });
     if (fresh.length === 0) continue;
 
-    // Sort by APR desc to highlight the strongest signal first.
     fresh.sort((a, b) => b.apr - a.apr);
     blocks.push(formatAlertBlock(rule, fresh));
 
@@ -342,6 +345,74 @@ async function main() {
   await sendTelegram(message);
   await saveSentCache(newlySent);
   console.log("Done.");
+}
+
+// Daily digest mode — runs on a separate cron, ignores the dedup cache, and
+// sends a "what's worth looking at right now" snapshot. Always sends so the
+// user has a daily anchor even when there are no fresh spikes.
+async function runDigest() {
+  console.log("Fetching for daily digest…");
+  const { rows, failures } = await fetchAll();
+  console.log(`Got ${rows.length} rows; failures: ${failures.length}`);
+
+  // Pick top 5 by APR per category, but only from liquid rows — the digest
+  // should be actionable, not noise. Filter empty categories afterwards.
+  const CATEGORIES = [
+    { key: "stable-lending", label: "Лендинг стейблов", emoji: "🏦" },
+    { key: "fixed-yield",    label: "Фикс. доходность", emoji: "📜" },
+    { key: "delta-neutral",  label: "Δ-нейтрал",        emoji: "⚖️" },
+    { key: "funding-rate",   label: "Funding (ликвидные)", emoji: "🔄" },
+    { key: "restaking",      label: "Рестейкинг",       emoji: "🧱" },
+  ];
+
+  const blocks = [];
+  for (const cat of CATEGORIES) {
+    const inCat = rows.filter(r => r.category === cat.key && r.liquid && r.apr > 0);
+    if (inCat.length === 0) continue;
+    inCat.sort((a, b) => b.apr - a.apr);
+    const top = inCat.slice(0, 5);
+    const lines = top.map(r => {
+      const where = r.chain
+        ? `${r.source} · ${r.market} (${r.chain})`
+        : `${r.source} · ${r.market}${r.quote ? "/" + r.quote : ""}`;
+      const tvlOrVol = r.tvl
+        ? ` · TVL ${formatUsdShort(r.tvl)}`
+        : r.volumeUsd
+          ? ` · об. ${formatUsdShort(r.volumeUsd)}`
+          : "";
+      return `  • <code>${escapeHtml(where)}</code> — <b>${r.apr.toFixed(2)}%</b>${tvlOrVol}`;
+    });
+    blocks.push(`${cat.emoji} <b>${cat.label}</b>\n${lines.join("\n")}`);
+  }
+
+  if (blocks.length === 0) {
+    console.log("Nothing to digest (probably all sources failed). Skipping.");
+    return;
+  }
+
+  const totalLiquid = rows.filter(r => r.liquid).length;
+  const totalRows = rows.length;
+  const header = `📊 <b>Soomqa — ежедневный обзор</b>
+<i>${new Date().toISOString().slice(0, 10)}</i>
+Всего рынков: ${totalRows} · ликвидных: ${totalLiquid}`;
+
+  const footer = failures.length > 0
+    ? `\n\n<i>⚠ Источники с ошибками: ${failures.map(f => f.source).join(", ")}</i>`
+    : "";
+
+  const message = [header, ...blocks].join("\n\n") + footer;
+
+  console.log("Sending digest:\n" + message);
+  await sendTelegram(message);
+  console.log("Done.");
+}
+
+async function main() {
+  // Dispatch on a CLI flag — keeps everything in one file so the fetcher
+  // logic doesn't drift between alert and digest modes.
+  const mode = process.argv.includes("--digest") ? "digest" : "alerts";
+  if (mode === "digest") await runDigest();
+  else await runAlerts();
 }
 
 main().catch(err => {

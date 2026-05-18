@@ -370,6 +370,7 @@ function loadFilters() {
       minApr: parsed.minApr === null || parsed.minApr === undefined ? null : Number(parsed.minApr),
       maxApr: parsed.maxApr === null || parsed.maxApr === undefined ? null : Number(parsed.maxApr),
       liquidOnly: Boolean(parsed.liquidOnly),
+      watchlistOnly: Boolean(parsed.watchlistOnly),
       sort: String(parsed.sort ?? "apr-desc"),
     };
   } catch {
@@ -384,10 +385,42 @@ const state = {
   rows: [],
   failures: [],
   lastUpdated: null,
-  filters: loadFilters() ?? { search: "", category: "", minApr: null, maxApr: null, liquidOnly: false, sort: "apr-desc" },
+  filters: loadFilters() ?? { search: "", category: "", minApr: null, maxApr: null, liquidOnly: false, watchlistOnly: false, sort: "apr-desc" },
   visibleRows: [],
   expandedRowIndex: null,
+  // APR history: rowKey → last known APR. Diffed each refresh to show ↑/↓ arrows.
+  previousApr: new Map(),
 };
+
+// ─── Watchlist (separate storage so user can clear filters without losing stars) ─
+
+const WATCHLIST_KEY = "soomqa.watchlist.v1";
+function loadWatchlist() {
+  try {
+    const raw = localStorage.getItem(WATCHLIST_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch {
+    return new Set();
+  }
+}
+function saveWatchlist() {
+  try { localStorage.setItem(WATCHLIST_KEY, JSON.stringify([...watchlist])); } catch {}
+}
+const watchlist = loadWatchlist();
+
+function rowKey(r) {
+  return `${r.source}|${r.market}|${r.category}`;
+}
+function isWatched(r) {
+  return watchlist.has(rowKey(r));
+}
+function toggleWatched(r) {
+  const key = rowKey(r);
+  if (watchlist.has(key)) watchlist.delete(key);
+  else watchlist.add(key);
+  saveWatchlist();
+}
 
 const els = {
   rows: document.getElementById("rows"),
@@ -397,6 +430,7 @@ const els = {
   minApr: document.getElementById("min-apr"),
   maxApr: document.getElementById("max-apr"),
   liquidOnly: document.getElementById("liquid-only"),
+  watchlistOnly: document.getElementById("watchlist-only"),
   refresh: document.getElementById("refresh"),
   lastUpdated: document.getElementById("last-updated"),
   errors: document.getElementById("errors"),
@@ -447,6 +481,9 @@ function applyFilters(rows) {
   }
   if (liquidOnly) {
     out = out.filter(r => r.liquid);
+  }
+  if (state.filters.watchlistOnly) {
+    out = out.filter(r => isWatched(r));
   }
 
   switch (sort) {
@@ -600,6 +637,13 @@ function renderCalculator(row) {
     ? `<div class="calc-recommendation">🎯 Оптимально: <b>${escapeHtml(projections[bestIdx].label)}</b> — net APY <b>${projections[bestIdx].netApy.toFixed(1)}%</b></div>`
     : `<div class="calc-recommendation neg">🚫 На сумме $${amount.toFixed(0)} ни один горизонт не окупается. Нужна сумма больше или APR выше.</div>`;
 
+  // Opportunity cost — what would the same capital earn in the safest liquid
+  // alternative right now (top stable lending APR among liquid rows)?
+  const baseline = findBaselineComparison(row);
+  const baselineBlock = baseline
+    ? renderBaselineComparison(row, baseline, amount, projections[bestIdx >= 0 ? bestIdx : projections.length - 1])
+    : "";
+
   return `
     <div class="calc-panel" data-calc-for="${row._idx}">
       <div class="calc-input-row">
@@ -628,7 +672,62 @@ function renderCalculator(row) {
       </div>
       ${breakLine}
       ${verdict}
+      ${baselineBlock}
       <div class="calc-formula">${variableNote}</div>
+    </div>
+  `;
+}
+
+// Find the safest liquid alternative for opportunity-cost framing. Prefer top
+// stable lending; fall back to top fixed yield. Skip if the row IS the
+// baseline (no point comparing Aave USDC to Aave USDC).
+function findBaselineComparison(row) {
+  const stables = state.rows.filter(r =>
+    r.liquid && r.category === "stable-lending" && r !== row,
+  );
+  if (stables.length > 0) {
+    return stables.reduce((a, b) => b.apr > a.apr ? b : a);
+  }
+  const fixeds = state.rows.filter(r =>
+    r.liquid && r.category === "fixed-yield" && r !== row,
+  );
+  if (fixeds.length > 0) {
+    return fixeds.reduce((a, b) => b.apr > a.apr ? b : a);
+  }
+  return null;
+}
+
+function renderBaselineComparison(row, baseline, amount, bestProjection) {
+  if (!bestProjection || amount <= 0) return "";
+  // Use the same horizon to make the comparison apples-to-apples.
+  const days = bestProjection.days;
+  const baseProj = projectAt(baseline, amount, days);
+  const horizonLabel = bestProjection.label;
+  const delta = bestProjection.net - baseProj.net;
+  const ratio = baseProj.net > 0 ? bestProjection.net / baseProj.net : null;
+
+  let verdict;
+  if (delta > 0) {
+    const ratioStr = ratio && ratio > 1.5 ? ` (×${ratio.toFixed(1)})` : "";
+    verdict = `<span class="calc-comparison-positive">+$${delta.toFixed(2)} больше${ratioStr}</span>`;
+  } else if (delta < -0.5) {
+    verdict = `<span class="calc-comparison-negative">−$${Math.abs(delta).toFixed(2)} меньше чем безопасный вариант</span>`;
+  } else {
+    verdict = `<span class="calc-comparison-neutral">≈ как у безопасной альтернативы</span>`;
+  }
+
+  return `
+    <div class="calc-comparison">
+      <div class="calc-comparison-label">Сравнение за <b>${escapeHtml(horizonLabel)}</b>:</div>
+      <div class="calc-comparison-row">
+        <span class="calc-comparison-pill">эта строка</span>
+        <span class="calc-comparison-amt ${bestProjection.isProfit ? "pos" : "neg"}">${bestProjection.net >= 0 ? "+" : "−"}$${Math.abs(bestProjection.net).toFixed(2)}</span>
+      </div>
+      <div class="calc-comparison-row">
+        <span class="calc-comparison-pill calc-comparison-base">${escapeHtml(baseline.source)} ${escapeHtml(baseline.market)} (${baseline.apr.toFixed(2)}%)</span>
+        <span class="calc-comparison-amt ${baseProj.isProfit ? "pos" : "neg"}">${baseProj.net >= 0 ? "+" : "−"}$${Math.abs(baseProj.net).toFixed(2)}</span>
+      </div>
+      <div class="calc-comparison-verdict">${verdict}</div>
     </div>
   `;
 }
@@ -649,8 +748,19 @@ function wireCalculatorListeners() {
   els.rows.querySelectorAll("tr.data-row").forEach(tr => {
     tr.addEventListener("click", e => {
       if (e.target.closest(".calc-panel")) return;
+      if (e.target.closest(".star-btn")) return;  // star handled separately
       const idx = Number(tr.dataset.rowIndex);
       state.expandedRowIndex = state.expandedRowIndex === idx ? null : idx;
+      render();
+    });
+  });
+  els.rows.querySelectorAll(".star-btn").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const idx = Number(btn.dataset.watchRow);
+      const r = state.visibleRows[idx];
+      if (!r) return;
+      toggleWatched(r);
       render();
     });
   });
@@ -738,12 +848,21 @@ function render() {
         ? `<span class="ml-1 text-[10px] text-amber-400/70" title="Тонкий рынок — APR быстро меняется">●</span>`
         : "";
       const expanded = state.expandedRowIndex === i;
+      const change = aprChange(r);
+      const arrow = change.direction === "up"
+        ? `<span class="apr-up" title="+${change.delta.toFixed(2)}% с прошлого обновления">▲</span>`
+        : change.direction === "down"
+          ? `<span class="apr-down" title="${change.delta.toFixed(2)}% с прошлого обновления">▼</span>`
+          : "";
+      const star = isWatched(r)
+        ? `<button class="star-btn star-on" data-watch-row="${i}" aria-label="Убрать из избранного">★</button>`
+        : `<button class="star-btn" data-watch-row="${i}" aria-label="В избранное">☆</button>`;
       return `
         <tr class="data-row ${rowOpacity} ${expanded ? "expanded" : ""}" data-row-index="${i}">
-          <td class="px-3 py-2 text-zinc-300">${escapeHtml(r.source)}</td>
+          <td class="px-3 py-2 text-zinc-300">${star}${escapeHtml(r.source)}</td>
           <td class="px-3 py-2 font-mono text-xs text-zinc-100">${escapeHtml(r.market)}${r.quote ? `<span class="text-zinc-500">/${escapeHtml(r.quote)}</span>` : ""}${marketBadge}</td>
           <td class="px-3 py-2 hidden sm:table-cell"><span class="badge ${cat.badge}">${cat.label}</span></td>
-          <td class="px-3 py-2 text-right font-mono ${colour}">${fmtApr(r.apr)}</td>
+          <td class="px-3 py-2 text-right font-mono ${colour}">${arrow}${fmtApr(r.apr)}</td>
           <td class="px-3 py-2 hidden md:table-cell text-zinc-400 text-xs">${r.fixed ? "фикс" : "плав"}</td>
           <td class="px-3 py-2 hidden lg:table-cell text-zinc-500 text-xs">${escapeHtml(r.note ?? "")}</td>
         </tr>
@@ -794,6 +913,14 @@ async function refreshData() {
   els.refresh.disabled = true;
   els.refresh.textContent = "↻ Загрузка…";
 
+  // Snapshot APRs from the prior fetch so the renderer can show ↑/↓ arrows.
+  // Only do this if we actually had data — first load shows no arrows.
+  if (state.rows.length > 0) {
+    const snapshot = new Map();
+    for (const r of state.rows) snapshot.set(rowKey(r), r.apr);
+    state.previousApr = snapshot;
+  }
+
   const results = await Promise.all([
     fetchBinance(),
     fetchBybit(),
@@ -817,6 +944,18 @@ async function refreshData() {
   els.refresh.textContent = "↻ Обновить";
 }
 
+// Returns: { delta: number, direction: "up"|"down"|"same"|null }
+// null direction = no prior snapshot, don't show an indicator yet.
+function aprChange(r) {
+  const prev = state.previousApr.get(rowKey(r));
+  if (prev == null) return { delta: 0, direction: null };
+  const delta = r.apr - prev;
+  // Tiny moves on stable-lending pools (0.01%) are noise; suppress them.
+  const epsilon = r.category === "stable-lending" ? 0.05 : 0.01;
+  if (Math.abs(delta) < epsilon) return { delta: 0, direction: "same" };
+  return { delta, direction: delta > 0 ? "up" : "down" };
+}
+
 // ─── Wire up listeners ────────────────────────────────────────────────────────
 
 // Debounce text inputs so we don't re-render on every keystroke.
@@ -835,6 +974,7 @@ els.sort.value = state.filters.sort;
 els.minApr.value = state.filters.minApr ?? "";
 els.maxApr.value = state.filters.maxApr ?? "";
 els.liquidOnly.checked = state.filters.liquidOnly;
+els.watchlistOnly.checked = state.filters.watchlistOnly;
 
 const onSearch = debounce(e => {
   state.filters.search = e.target.value.trim();
@@ -859,6 +999,11 @@ els.minApr.addEventListener("input", onMinApr);
 els.maxApr.addEventListener("input", onMaxApr);
 els.liquidOnly.addEventListener("change", e => {
   state.filters.liquidOnly = e.target.checked;
+  saveFilters();
+  render();
+});
+els.watchlistOnly.addEventListener("change", e => {
+  state.filters.watchlistOnly = e.target.checked;
   saveFilters();
   render();
 });
