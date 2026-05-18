@@ -47,6 +47,18 @@ async function postJson(url, body, timeoutMs = 15000) {
 
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
 
+// Funding APRs above this are almost always short-lived spikes on thin
+// altcoin markets — visible but flagged so the user can spot them.
+const FUNDING_SPIKE_THRESHOLD = 100;
+
+function fundingNote(apr, period) {
+  const base = `${period} funding`;
+  if (Math.abs(apr) > FUNDING_SPIKE_THRESHOLD) {
+    return `${base} · thin market, mean-reverts fast`;
+  }
+  return base;
+}
+
 // Binance USD-M futures — ALL perpetual markets (typically ~400+).
 async function fetchBinance() {
   try {
@@ -59,14 +71,15 @@ async function fetchBinance() {
         // anchoring would corrupt names like "USDTUSDC" or "1000USDT".
         const quote = r.symbol.endsWith("USDC") ? "USDC" : "USDT";
         const base = r.symbol.replace(new RegExp(`${quote}$`), "");
+        const apr = Number(r.lastFundingRate) * APR_8H * 100;
         return {
           source: "Binance",
           market: base,
           quote,
           category: "funding-rate",
-          apr: Number(r.lastFundingRate) * APR_8H * 100,
+          apr,
           fixed: false,
-          note: "8h funding",
+          note: fundingNote(apr, "8h"),
         };
       });
     return { ok: true, data: rows };
@@ -93,14 +106,15 @@ async function fetchBybit() {
         } else if (market.endsWith("USDT")) {
           market = market.replace(/USDT$/, "");
         }
+        const apr = Number(r.fundingRate) * APR_8H * 100;
         return {
           source: "Bybit",
           market,
           quote,
           category: "funding-rate",
-          apr: Number(r.fundingRate) * APR_8H * 100,
+          apr,
           fixed: false,
-          note: "8h funding",
+          note: fundingNote(apr, "8h"),
         };
       });
     return { ok: true, data: rows };
@@ -127,7 +141,7 @@ async function fetchHyperliquid() {
         category: "funding-rate",
         apr,
         fixed: false,
-        note: "1h funding",
+        note: fundingNote(apr, "1h"),
       });
     }
     return { ok: true, data: rows };
@@ -137,39 +151,63 @@ async function fetchHyperliquid() {
 }
 
 // DefiLlama aggregated yields — Aave, Morpho, Pendle, Ethena, Sky, etc.
-// One endpoint, ~13,000 pools. We filter and bucket here in the browser.
+// One endpoint, ~13,000 pools. We filter aggressively here because the raw
+// feed includes scam tokens with names like "1337USDC" or "ADPUSDC" that
+// show 5-figure APRs and would otherwise pollute the table.
+
+// Symbol whitelists per category. Anything outside this list gets dropped.
+// Match is "symbol contains any of these tokens", case-insensitive.
+// Lending and delta-neutral are kept tight on purpose — these are pools we'd
+// actually consider depositing into, so non-canonical stables must be excluded.
+const CANONICAL_STABLES = ["USDC", "USDT", "DAI", "USDS", "USDE", "SUSDE", "SUSDS", "GHO", "PYUSD", "USR", "USDX"];
+const CANONICAL_ETH_DERIVS = ["WSTETH", "STETH", "EETH", "EZETH", "RSETH", "PUFETH", "WBETH", "RETH"];
+
+function symbolMatchesAny(symbol, needles) {
+  const s = String(symbol ?? "").toUpperCase();
+  return needles.some(n => s.includes(n.toUpperCase()));
+}
+
 async function fetchDefiLlama() {
   try {
     const resp = await getJson("https://yields.llama.fi/pools");
     if (resp.status !== "success") throw new Error(`bad status: ${resp.status}`);
 
-    // Whitelist of projects to surface, with the category bucket and a note.
+    // Per-project rules. Tighter TVL floors + symbol whitelist eliminate
+    // scam look-alike pools that DefiLlama lists indiscriminately.
     const PROJECT_RULES = [
-      // Stable lending
-      { project: "aave-v3",       minTvl: 50_000_000, category: "stable-lending", source: "Aave v3",      note: "instant withdraw, low risk" },
-      { project: "aave-v2",       minTvl: 50_000_000, category: "stable-lending", source: "Aave v2",      note: "legacy market" },
-      { project: "compound-v3",   minTvl: 20_000_000, category: "stable-lending", source: "Compound v3",  note: "isolated markets" },
-      { project: "morpho-blue",   minTvl: 10_000_000, category: "stable-lending", source: "Morpho Blue",  note: "check curator" },
-      { project: "spark",         minTvl: 50_000_000, category: "stable-lending", source: "Spark",        note: "DAI savings rate" },
-      { project: "sky-lending",   minTvl: 50_000_000, category: "stable-lending", source: "Sky sUSDS",    note: "governance savings" },
-      // Fixed yield
-      { project: "pendle",        minTvl: 1_000_000,  category: "fixed-yield",    source: "Pendle",       note: "PT or YT — locked to maturity" },
-      // Delta-neutral / packaged
-      { project: "ethena-usde",   minTvl: 100_000_000,category: "delta-neutral",  source: "Ethena",       note: "packaged funding arb" },
-      // Restaking
-      { project: "eigenlayer",    minTvl: 100_000_000,category: "restaking",      source: "EigenLayer",   note: "AVS yield + slashing risk" },
-      { project: "ether.fi-stake",minTvl: 100_000_000,category: "restaking",      source: "Ether.fi eETH",note: "liquid restaking" },
-      { project: "renzo",         minTvl: 50_000_000, category: "restaking",      source: "Renzo ezETH",  note: "liquid restaking" },
-      { project: "kelp-dao",      minTvl: 50_000_000, category: "restaking",      source: "Kelp rsETH",   note: "liquid restaking" },
-      { project: "puffer-finance",minTvl: 50_000_000, category: "restaking",      source: "Puffer pufETH",note: "anti-slashing LRT" },
+      // Stable lending — only canonical stables, $50M+ TVL
+      { project: "aave-v3",       minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Aave v3",      note: "instant withdraw, low risk" },
+      { project: "aave-v2",       minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Aave v2",      note: "legacy market" },
+      { project: "compound-v3",   minTvl: 30_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Compound v3",  note: "isolated markets" },
+      { project: "morpho-blue",   minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Morpho Blue",  note: "check curator before deposit" },
+      { project: "spark",         minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Spark",        note: "DAI savings rate" },
+      { project: "sky-lending",   minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Sky sUSDS",    note: "governance-managed savings" },
+      // Fixed yield (Pendle PT/YT). No symbol whitelist — Pendle constantly
+      // launches PTs on new vault tokens (e.g. AVLT, LBTC) that aren't in any
+      // canonical list. TVL floor + APR cap below filter the junk.
+      { project: "pendle",        minTvl: 5_000_000,   symbols: null,               category: "fixed-yield",    source: "Pendle",       note: "locked to maturity" },
+      // Delta-neutral
+      { project: "ethena-usde",   minTvl: 100_000_000, symbols: ["USDE", "SUSDE"],  category: "delta-neutral",  source: "Ethena",       note: "packaged funding arb" },
+      // Restaking — by underlying LST/LRT
+      { project: "eigenlayer",    minTvl: 100_000_000, symbols: CANONICAL_ETH_DERIVS, category: "restaking",   source: "EigenLayer",   note: "AVS yield + slashing risk" },
+      { project: "ether.fi-stake",minTvl: 100_000_000, symbols: ["EETH", "WEETH"],  category: "restaking",      source: "Ether.fi eETH",note: "liquid restaking" },
+      { project: "renzo",         minTvl: 50_000_000,  symbols: ["EZETH"],          category: "restaking",      source: "Renzo ezETH",  note: "liquid restaking" },
+      { project: "kelp-dao",      minTvl: 50_000_000,  symbols: ["RSETH"],          category: "restaking",      source: "Kelp rsETH",   note: "liquid restaking" },
+      { project: "puffer-finance",minTvl: 50_000_000,  symbols: ["PUFETH"],         category: "restaking",      source: "Puffer pufETH",note: "anti-slashing LRT" },
     ];
+
+    // Hard sanity cap. Anything above this is almost certainly an emission
+    // farm on a worthless token, not a real yield. Real DeFi APYs maxed out
+    // around 60-80% on legit pools even in peak bull markets.
+    const MAX_REALISTIC_APR = 200;
 
     const rows = [];
     for (const rule of PROJECT_RULES) {
       const pools = resp.data
         .filter(p => p.project === rule.project)
         .filter(p => (p.tvlUsd ?? 0) >= rule.minTvl)
-        .filter(p => p.apy !== null && p.apy !== undefined && p.apy > 0);
+        .filter(p => p.apy != null && p.apy > 0 && p.apy <= MAX_REALISTIC_APR)
+        .filter(p => rule.symbols === null || symbolMatchesAny(p.symbol, rule.symbols));
 
       for (const p of pools) {
         rows.push({
@@ -212,7 +250,8 @@ function loadFilters() {
     return {
       search: String(parsed.search ?? ""),
       category: String(parsed.category ?? ""),
-      minApr: parsed.minApr === null ? null : Number(parsed.minApr),
+      minApr: parsed.minApr === null || parsed.minApr === undefined ? null : Number(parsed.minApr),
+      maxApr: parsed.maxApr === null || parsed.maxApr === undefined ? null : Number(parsed.maxApr),
       sort: String(parsed.sort ?? "apr-desc"),
     };
   } catch {
@@ -227,7 +266,7 @@ const state = {
   rows: [],
   failures: [],
   lastUpdated: null,
-  filters: loadFilters() ?? { search: "", category: "", minApr: null, sort: "apr-desc" },
+  filters: loadFilters() ?? { search: "", category: "", minApr: null, maxApr: null, sort: "apr-desc" },
 };
 
 const els = {
@@ -236,6 +275,7 @@ const els = {
   category: document.getElementById("category-filter"),
   sort: document.getElementById("sort-by"),
   minApr: document.getElementById("min-apr"),
+  maxApr: document.getElementById("max-apr"),
   refresh: document.getElementById("refresh"),
   lastUpdated: document.getElementById("last-updated"),
   errors: document.getElementById("errors"),
@@ -265,7 +305,7 @@ function fmtApr(apr) {
 }
 
 function applyFilters(rows) {
-  const { search, category, minApr, sort } = state.filters;
+  const { search, category, minApr, maxApr, sort } = state.filters;
   let out = rows;
 
   if (search) {
@@ -281,6 +321,9 @@ function applyFilters(rows) {
   if (minApr !== null && !Number.isNaN(minApr)) {
     out = out.filter(r => r.apr >= minApr);
   }
+  if (maxApr !== null && !Number.isNaN(maxApr)) {
+    out = out.filter(r => r.apr <= maxApr);
+  }
 
   switch (sort) {
     case "apr-desc": out = [...out].sort((a, b) => b.apr - a.apr); break;
@@ -294,14 +337,21 @@ function applyFilters(rows) {
 function render() {
   const filtered = applyFilters(state.rows);
 
-  // Summary cards
-  if (state.rows.length > 0) {
-    const best = state.rows.reduce((a, b) => b.apr > a.apr ? b : a);
-    els.sum.bestApr.textContent = fmtApr(best.apr);
-    els.sum.bestApr.className = `text-xl font-semibold mt-1 font-mono ${aprColourClass(best.apr)}`;
-    els.sum.bestSrc.textContent = `${best.source} · ${best.market}`;
+  // Summary cards. Use only sustainable yields here — short-lived funding
+  // spikes (>100% APR) and DeFi emission farms aren't honest representations
+  // of "what's the best yield right now". They still appear in the table.
+  const SUMMARY_APR_CAP = 100;
+  const sustainable = state.rows.filter(r => r.apr <= SUMMARY_APR_CAP);
 
-    const fixed = state.rows.filter(r => r.fixed);
+  if (state.rows.length > 0) {
+    if (sustainable.length > 0) {
+      const best = sustainable.reduce((a, b) => b.apr > a.apr ? b : a);
+      els.sum.bestApr.textContent = fmtApr(best.apr);
+      els.sum.bestApr.className = `text-xl font-semibold mt-1 font-mono ${aprColourClass(best.apr)}`;
+      els.sum.bestSrc.textContent = `${best.source} · ${best.market}`;
+    }
+
+    const fixed = sustainable.filter(r => r.fixed);
     if (fixed.length > 0) {
       const bestFixed = fixed.reduce((a, b) => b.apr > a.apr ? b : a);
       els.sum.fixedApr.textContent = fmtApr(bestFixed.apr);
@@ -309,7 +359,7 @@ function render() {
       els.sum.fixedSrc.textContent = `${bestFixed.source} · ${bestFixed.market}`;
     }
 
-    const stable = state.rows.filter(r => r.category === "stable-lending");
+    const stable = sustainable.filter(r => r.category === "stable-lending");
     if (stable.length > 0) {
       const bestStable = stable.reduce((a, b) => b.apr > a.apr ? b : a);
       els.sum.stableApr.textContent = fmtApr(bestStable.apr);
@@ -422,6 +472,7 @@ els.search.value = state.filters.search;
 els.category.value = state.filters.category;
 els.sort.value = state.filters.sort;
 els.minApr.value = state.filters.minApr ?? "";
+els.maxApr.value = state.filters.maxApr ?? "";
 
 const onSearch = debounce(e => {
   state.filters.search = e.target.value.trim();
@@ -434,9 +485,16 @@ const onMinApr = debounce(e => {
   saveFilters();
   render();
 }, 150);
+const onMaxApr = debounce(e => {
+  const v = e.target.value === "" ? null : Number(e.target.value);
+  state.filters.maxApr = Number.isNaN(v) ? null : v;
+  saveFilters();
+  render();
+}, 150);
 
 els.search.addEventListener("input", onSearch);
 els.minApr.addEventListener("input", onMinApr);
+els.maxApr.addEventListener("input", onMaxApr);
 els.category.addEventListener("change", e => {
   state.filters.category = e.target.value;
   saveFilters();
