@@ -336,6 +336,9 @@ async function fetchDefiLlama() {
           liquid,
           note: noteParts.join(" · "),
           tvl,
+          // DefiLlama gives each pool a stable UUID — we keep it on the row
+          // so the history loader can call /chart/{poolId} later.
+          poolId: p.pool,
         });
       }
     }
@@ -495,7 +498,260 @@ function applyFilters(rows) {
   return out;
 }
 
-// ─── Yield calculator ─────────────────────────────────────────────────────────
+// ─── Historical APR / yield (loaded on demand when a row is expanded) ────────
+//
+// Each source has its own history endpoint and returns its own time series
+// shape. We normalise everything into { points: [{ time, value }], unit: "%" }
+// where `value` is already in APR percent.
+//
+// Cache: in-memory only. Cleared on page reload. 5-minute freshness so we
+// don't re-fetch on every keystroke in the calculator.
+
+const HISTORY_CACHE_TTL_MS = 5 * 60 * 1000;
+const historyCache = new Map();  // key = `${rowKey}|${period}` → { points, fetchedAt }
+
+function historyCacheKey(row, periodDays) {
+  return `${rowKey(row)}|${periodDays}`;
+}
+
+async function loadHistoryFor(row, periodDays) {
+  const key = historyCacheKey(row, periodDays);
+  const cached = historyCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < HISTORY_CACHE_TTL_MS) {
+    return { ok: true, data: cached };
+  }
+  try {
+    let points;
+    if (row.source === "Binance")          points = await fetchBinanceHistory(row, periodDays);
+    else if (row.source === "Bybit")       points = await fetchBybitHistory(row, periodDays);
+    else if (row.source === "Hyperliquid") points = await fetchHyperliquidHistory(row, periodDays);
+    else if (row.poolId)                   points = await fetchDefiLlamaHistory(row, periodDays);
+    else return { ok: false, error: "источник без истории" };
+
+    const entry = { points, fetchedAt: Date.now() };
+    historyCache.set(key, entry);
+    return { ok: true, data: entry };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function fetchBinanceHistory(row, periodDays) {
+  // 3 funding cycles per day (8h each) — request enough points to fill the window.
+  const limit = Math.min(1000, Math.max(20, Math.ceil(periodDays * 3)));
+  const symbol = `${row.market}${row.quote}`;
+  const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${encodeURIComponent(symbol)}&limit=${limit}`;
+  const data = await getJson(url);
+  return data.map(d => ({
+    time: Number(d.fundingTime),
+    value: Number(d.fundingRate) * APR_8H * 100,
+  }));
+}
+
+async function fetchBybitHistory(row, periodDays) {
+  const limit = Math.min(200, Math.max(20, Math.ceil(periodDays * 3)));
+  const symbol = row.quote === "USDC" ? `${row.market}PERP` : `${row.market}USDT`;
+  const url = `https://api.bybit.com/v5/market/funding/history?category=linear&symbol=${encodeURIComponent(symbol)}&limit=${limit}`;
+  const data = await getJson(url);
+  const list = data?.result?.list ?? [];
+  // Bybit returns newest-first; reverse so x-axis flows left→right in time.
+  return list.slice().reverse().map(d => ({
+    time: Number(d.fundingRateTimestamp),
+    value: Number(d.fundingRate) * APR_8H * 100,
+  }));
+}
+
+async function fetchHyperliquidHistory(row, periodDays) {
+  const startTime = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+  const data = await postJson("https://api.hyperliquid.xyz/info", {
+    type: "fundingHistory",
+    coin: row.market,
+    startTime,
+  });
+  return (data ?? []).map(d => ({
+    time: Number(d.time),
+    value: Number(d.fundingRate) * APR_1H * 100,
+  }));
+}
+
+async function fetchDefiLlamaHistory(row, periodDays) {
+  const url = `https://yields.llama.fi/chart/${encodeURIComponent(row.poolId)}`;
+  const data = await getJson(url);
+  if (data.status !== "success") throw new Error(`bad status: ${data.status}`);
+  const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+  return data.data
+    .map(d => ({
+      time: new Date(d.timestamp).getTime(),
+      value: Number(d.apy) || 0,
+    }))
+    .filter(p => p.time >= cutoff);
+}
+
+// ─── Sparkline (pure SVG, no library) ─────────────────────────────────────────
+
+function renderSparkline(points, width = 320, height = 70) {
+  if (!points || points.length < 2) {
+    return `<svg viewBox="0 0 ${width} ${height}" class="sparkline"><text x="${width/2}" y="${height/2}" text-anchor="middle" fill="#6b7280" font-size="11">Недостаточно данных</text></svg>`;
+  }
+  const values = points.map(p => p.value);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = (maxV - minV) || 1;
+  const stepX = (width - 4) / (points.length - 1);
+  const yFor = v => height - 4 - ((v - minV) / range) * (height - 8);
+
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${(2 + i * stepX).toFixed(2)} ${yFor(p.value).toFixed(2)}`).join(" ");
+  const fillPath = `${path} L ${(width - 2).toFixed(2)} ${height - 2} L 2 ${height - 2} Z`;
+
+  // Zero baseline (for funding rates that go negative)
+  const zeroVisible = minV < 0 && maxV > 0;
+  const zeroY = zeroVisible ? yFor(0) : null;
+
+  const lastIdx = points.length - 1;
+  const lastX = 2 + lastIdx * stepX;
+  const lastY = yFor(points[lastIdx].value);
+  const lastClass = points[lastIdx].value < 0 ? "spark-neg" : "spark-pos";
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="sparkline">
+      ${zeroVisible ? `<line x1="0" x2="${width}" y1="${zeroY}" y2="${zeroY}" class="spark-zero"/>` : ""}
+      <path d="${fillPath}" class="spark-fill"/>
+      <path d="${path}" class="spark-line"/>
+      <circle cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="3" class="${lastClass}"/>
+    </svg>
+  `;
+}
+
+// ─── Period selector ──────────────────────────────────────────────────────────
+
+const HISTORY_PERIODS = [
+  { days: 1,  label: "24ч" },
+  { days: 7,  label: "7д"  },
+  { days: 30, label: "30д" },
+  { days: 90, label: "90д" },
+];
+
+// Per-row selected period; persists across re-renders.
+const selectedPeriods = new Map();
+function selectedPeriodFor(row) {
+  const key = rowKey(row);
+  return selectedPeriods.get(key) ?? 7;
+}
+
+function statsFromPoints(points) {
+  if (!points || points.length === 0) return null;
+  const values = points.map(p => p.value);
+  const avg = values.reduce((s, v) => s + v, 0) / values.length;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return { avg, min, max, count: values.length };
+}
+
+function renderHistorySection(row) {
+  const period = selectedPeriodFor(row);
+  const cacheKey = historyCacheKey(row, period);
+  const cached = historyCache.get(cacheKey);
+
+  const chips = HISTORY_PERIODS.map(p => `
+    <button class="history-chip ${p.days === period ? "history-chip-active" : ""}" data-period="${p.days}">${p.label}</button>
+  `).join("");
+
+  let body;
+  if (cached) {
+    const stats = statsFromPoints(cached.points);
+    const sparkline = renderSparkline(cached.points);
+    body = `
+      <div class="history-chart">${sparkline}</div>
+      ${stats ? `
+        <div class="history-stats">
+          <span><span class="lbl">сейчас</span> <b>${row.apr.toFixed(2)}%</b></span>
+          <span><span class="lbl">средн.</span> ${stats.avg.toFixed(2)}%</span>
+          <span><span class="lbl">мин</span> ${stats.min.toFixed(2)}%</span>
+          <span><span class="lbl">макс</span> ${stats.max.toFixed(2)}%</span>
+          <span><span class="lbl">точек</span> ${stats.count}</span>
+        </div>
+        ${historicalVerdict(row, stats)}
+      ` : `<div class="history-empty">Истории нет</div>`}
+    `;
+  } else {
+    body = `<div class="history-loading">Загружаем историю…</div>`;
+  }
+
+  return `
+    <div class="history-section" data-history-for="${row._idx}">
+      <div class="history-header">
+        <span class="history-title">История APR</span>
+        <div class="history-chips">${chips}</div>
+      </div>
+      ${body}
+    </div>
+  `;
+}
+
+// Compare current APR against historical average → "spike", "normal", "low".
+function historicalVerdict(row, stats) {
+  if (stats.count < 5) return "";
+  const ratio = stats.avg !== 0 ? row.apr / stats.avg : 1;
+  const absDiff = row.apr - stats.avg;
+
+  if (Math.abs(absDiff) < Math.abs(stats.avg) * 0.15) {
+    return `<div class="history-verdict history-verdict-neutral">📊 Текущая ставка близка к среднему за период — стабильное значение.</div>`;
+  }
+  if (row.apr > stats.avg && ratio > 1.5) {
+    return `<div class="history-verdict history-verdict-spike">📈 Текущая ставка в ${ratio.toFixed(1)}× выше среднего — это спайк, может откатиться.</div>`;
+  }
+  if (row.apr < stats.avg && ratio < 0.7) {
+    return `<div class="history-verdict history-verdict-low">📉 Текущая ставка ниже среднего — ниша остыла, ждать смысла нет.</div>`;
+  }
+  if (row.apr > stats.avg) {
+    return `<div class="history-verdict history-verdict-up">📈 Текущая ставка выше среднего на ${absDiff.toFixed(2)}%.</div>`;
+  }
+  return `<div class="history-verdict history-verdict-down">📉 Текущая ставка ниже среднего на ${Math.abs(absDiff).toFixed(2)}%.</div>`;
+}
+
+// Triggered after a calculator panel is mounted in the DOM. Kicks off the
+// history fetch in background, then swaps the placeholder when data arrives.
+async function ensureHistoryLoaded(row) {
+  const period = selectedPeriodFor(row);
+  const cacheKey = historyCacheKey(row, period);
+  if (historyCache.has(cacheKey)) {
+    repaintHistorySection(row);
+    return;
+  }
+  const result = await loadHistoryFor(row, period);
+  if (!result.ok) {
+    // Stash an empty placeholder so we don't refetch a failing endpoint in
+    // a tight loop; but DO let the user retry after the TTL.
+    historyCache.set(cacheKey, { points: [], fetchedAt: Date.now() });
+  }
+  repaintHistorySection(row);
+}
+
+function repaintHistorySection(row) {
+  if (!row || row._idx == null) return;
+  const section = document.querySelector(`.history-section[data-history-for="${row._idx}"]`);
+  if (!section) return;
+  const newHtml = renderHistorySection(row);
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = newHtml;
+  const newSection = wrapper.firstElementChild;
+  section.replaceWith(newSection);
+  wireHistoryChipListeners(newSection, row);
+}
+
+function wireHistoryChipListeners(section, row) {
+  section.querySelectorAll(".history-chip").forEach(chip => {
+    chip.addEventListener("click", e => {
+      e.stopPropagation();
+      const days = Number(chip.dataset.period);
+      selectedPeriods.set(rowKey(row), days);
+      repaintHistorySection(row);
+      ensureHistoryLoaded(row);
+    });
+  });
+}
+
+
 //
 // Click a row → a panel drops underneath. The user enters ONLY the amount.
 // The calculator then projects the position across all relevant horizons,
@@ -673,6 +929,7 @@ function renderCalculator(row) {
       ${breakLine}
       ${verdict}
       ${baselineBlock}
+      ${renderHistorySection(row)}
       <div class="calc-formula">${variableNote}</div>
     </div>
   `;
@@ -766,6 +1023,15 @@ function wireCalculatorListeners() {
   });
   els.rows.querySelectorAll(".calc-panel input[data-calc-input]").forEach(input => {
     attachCalcInputListener(input);
+  });
+  // Each expanded panel has one history section — wire its chips and kick
+  // off the (cached, async) data fetch.
+  els.rows.querySelectorAll(".history-section").forEach(section => {
+    const idx = Number(section.dataset.historyFor);
+    const row = state.visibleRows[idx];
+    if (!row) return;
+    wireHistoryChipListeners(section, row);
+    ensureHistoryLoaded(row);
   });
 }
 
