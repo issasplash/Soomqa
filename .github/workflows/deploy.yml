@@ -1,4 +1,4 @@
-# Auto-publishes the site to GitHub Pages on every push to main.
+# Auto-publishes the site to GitHub Pages on every push.
 # After the first successful run, the URL is https://issasplash.github.io/Soomqa/
 #
 # Enable Pages once in repo Settings → Pages → Source = "GitHub Actions".
@@ -7,7 +7,9 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "claude/**"
   workflow_dispatch:
 
 permissions:
