@@ -803,38 +803,127 @@ async function fetchDefiLlamaHistory(row, periodDays) {
 }
 
 // ─── Sparkline (pure SVG, no library) ─────────────────────────────────────────
+//
+// Renders an APR sparkline + invisible hover/touch overlay that surfaces a
+// tooltip with the exact date and value at the user's finger position.
+// On mobile this picks up touchmove naturally; on desktop, mousemove.
 
-function renderSparkline(points, width = 320, height = 70) {
+const SPARK_W = 320;
+const SPARK_H = 70;
+
+function renderSparkline(points) {
   if (!points || points.length < 2) {
-    return `<svg viewBox="0 0 ${width} ${height}" class="sparkline"><text x="${width/2}" y="${height/2}" text-anchor="middle" fill="#6b7280" font-size="11">Недостаточно данных</text></svg>`;
+    return `<div class="sparkline-wrap"><svg viewBox="0 0 ${SPARK_W} ${SPARK_H}" class="sparkline"><text x="${SPARK_W/2}" y="${SPARK_H/2}" text-anchor="middle" fill="#6b7280" font-size="11">Недостаточно данных</text></svg></div>`;
   }
   const values = points.map(p => p.value);
   const minV = Math.min(...values);
   const maxV = Math.max(...values);
   const range = (maxV - minV) || 1;
-  const stepX = (width - 4) / (points.length - 1);
-  const yFor = v => height - 4 - ((v - minV) / range) * (height - 8);
+  const stepX = (SPARK_W - 4) / (points.length - 1);
+  const yFor = v => SPARK_H - 4 - ((v - minV) / range) * (SPARK_H - 8);
+  const xFor = i => 2 + i * stepX;
 
-  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${(2 + i * stepX).toFixed(2)} ${yFor(p.value).toFixed(2)}`).join(" ");
-  const fillPath = `${path} L ${(width - 2).toFixed(2)} ${height - 2} L 2 ${height - 2} Z`;
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(i).toFixed(2)} ${yFor(p.value).toFixed(2)}`).join(" ");
+  const fillPath = `${path} L ${(SPARK_W - 2).toFixed(2)} ${SPARK_H - 2} L 2 ${SPARK_H - 2} Z`;
 
-  // Zero baseline (for funding rates that go negative)
   const zeroVisible = minV < 0 && maxV > 0;
   const zeroY = zeroVisible ? yFor(0) : null;
 
   const lastIdx = points.length - 1;
-  const lastX = 2 + lastIdx * stepX;
+  const lastX = xFor(lastIdx);
   const lastY = yFor(points[lastIdx].value);
   const lastClass = points[lastIdx].value < 0 ? "spark-neg" : "spark-pos";
 
   return `
-    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="sparkline">
-      ${zeroVisible ? `<line x1="0" x2="${width}" y1="${zeroY}" y2="${zeroY}" class="spark-zero"/>` : ""}
-      <path d="${fillPath}" class="spark-fill"/>
-      <path d="${path}" class="spark-line"/>
-      <circle cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="3" class="${lastClass}"/>
-    </svg>
+    <div class="sparkline-wrap">
+      <svg viewBox="0 0 ${SPARK_W} ${SPARK_H}" preserveAspectRatio="none" class="sparkline">
+        ${zeroVisible ? `<line x1="0" x2="${SPARK_W}" y1="${zeroY}" y2="${zeroY}" class="spark-zero"/>` : ""}
+        <path d="${fillPath}" class="spark-fill"/>
+        <path d="${path}" class="spark-line"/>
+        <circle cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="3" class="${lastClass}"/>
+        <line x1="0" x2="0" y1="0" y2="${SPARK_H}" class="spark-hover-line" style="display:none"/>
+        <circle r="4" class="spark-hover-marker" style="display:none"/>
+      </svg>
+      <div class="sparkline-tooltip" style="display:none"></div>
+    </div>
   `;
+}
+
+// Attach mouse/touch interactivity to a sparkline wrapper. Called after the
+// section is mounted (or replaced) in the DOM. `points` is the same array
+// that was used to render the SVG.
+function attachSparklineHover(wrap, points) {
+  if (!wrap || !points || points.length < 2) return;
+  const svg = wrap.querySelector("svg.sparkline");
+  const tooltip = wrap.querySelector(".sparkline-tooltip");
+  const hoverLine = wrap.querySelector(".spark-hover-line");
+  const hoverMarker = wrap.querySelector(".spark-hover-marker");
+  if (!svg || !tooltip || !hoverLine || !hoverMarker) return;
+
+  const values = points.map(p => p.value);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = (maxV - minV) || 1;
+
+  function handleAt(clientX) {
+    const rect = svg.getBoundingClientRect();
+    const relX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const ratio = relX / rect.width;
+    // Convert ratio → index in the points array.
+    const idx = Math.max(0, Math.min(points.length - 1, Math.round(ratio * (points.length - 1))));
+    const p = points[idx];
+
+    // Convert idx → SVG coordinate, then to screen pixels via the SVG's
+    // viewBox/element ratio. Easier: use percentages on the line element.
+    const xSvg = 2 + (idx * (SPARK_W - 4) / (points.length - 1));
+    const ySvg = SPARK_H - 4 - ((p.value - minV) / range) * (SPARK_H - 8);
+
+    hoverLine.style.display = "";
+    hoverLine.setAttribute("x1", String(xSvg));
+    hoverLine.setAttribute("x2", String(xSvg));
+
+    hoverMarker.style.display = "";
+    hoverMarker.setAttribute("cx", String(xSvg));
+    hoverMarker.setAttribute("cy", String(ySvg));
+
+    tooltip.style.display = "";
+    tooltip.innerHTML = formatTooltip(p);
+    // Position tooltip in CSS pixels relative to wrapper.
+    const pxLeft = (xSvg / SPARK_W) * rect.width;
+    tooltip.style.left = `${Math.max(0, Math.min(rect.width - tooltip.offsetWidth, pxLeft - tooltip.offsetWidth / 2))}px`;
+  }
+
+  function clear() {
+    hoverLine.style.display = "none";
+    hoverMarker.style.display = "none";
+    tooltip.style.display = "none";
+  }
+
+  svg.addEventListener("mousemove", e => handleAt(e.clientX));
+  svg.addEventListener("mouseleave", clear);
+  svg.addEventListener("touchstart", e => {
+    if (e.touches.length > 0) handleAt(e.touches[0].clientX);
+  }, { passive: true });
+  svg.addEventListener("touchmove", e => {
+    if (e.touches.length > 0) handleAt(e.touches[0].clientX);
+  }, { passive: true });
+  svg.addEventListener("touchend", clear);
+}
+
+function formatTooltip(point) {
+  const date = new Date(point.time);
+  const now = Date.now();
+  const ageMs = now - point.time;
+  const ageHours = ageMs / (1000 * 60 * 60);
+  // Show full date for ranges > 24h, time-of-day for shorter horizons.
+  let dateStr;
+  if (ageHours > 36) {
+    dateStr = date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+  } else {
+    dateStr = date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+  const colour = point.value < 0 ? "color:#fca5a5" : point.value >= 15 ? "color:#4ade80" : "color:#d4d4d8";
+  return `<span class="tt-date">${dateStr}</span><span class="tt-value" style="${colour}"><b>${point.value.toFixed(2)}%</b></span>`;
 }
 
 // ─── Period selector ──────────────────────────────────────────────────────────
@@ -952,6 +1041,13 @@ function repaintHistorySection(row) {
   const newSection = wrapper.firstElementChild;
   section.replaceWith(newSection);
   wireHistoryChipListeners(newSection, row);
+  // Attach hover/touch tooltip to the just-rendered sparkline.
+  const period = selectedPeriodFor(row);
+  const cached = historyCache.get(historyCacheKey(row, period));
+  if (cached && cached.points.length >= 2) {
+    const sparkWrap = newSection.querySelector(".sparkline-wrap");
+    attachSparklineHover(sparkWrap, cached.points);
+  }
   // Recommendation depends on history stats — re-paint it whenever the
   // history section changes (new data arrived, or user switched period).
   repaintRecommendation(row);
@@ -1265,13 +1361,19 @@ function wireCalculatorListeners() {
   els.rows.querySelectorAll(".calc-panel input[data-calc-input]").forEach(input => {
     attachCalcInputListener(input);
   });
-  // Each expanded panel has one history section — wire its chips and kick
-  // off the (cached, async) data fetch.
+  // Each expanded panel has one history section — wire its chips, attach
+  // hover tooltip if data is already cached, and kick off the async fetch.
   els.rows.querySelectorAll(".history-section").forEach(section => {
     const idx = Number(section.dataset.historyFor);
     const row = state.visibleRows[idx];
     if (!row) return;
     wireHistoryChipListeners(section, row);
+    const period = selectedPeriodFor(row);
+    const cached = historyCache.get(historyCacheKey(row, period));
+    if (cached && cached.points.length >= 2) {
+      const sparkWrap = section.querySelector(".sparkline-wrap");
+      attachSparklineHover(sparkWrap, cached.points);
+    }
     ensureHistoryLoaded(row);
   });
 }
