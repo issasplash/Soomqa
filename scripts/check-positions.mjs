@@ -172,7 +172,7 @@ async function fetchHyperliquid() {
         side: size > 0 ? "LONG" : "SHORT",
         size: Math.abs(size),
         entryPrice: Number(p.entryPx),
-        markPrice: Number(p.markPx ?? 0),  // may not be present, derive from unrealized PnL
+        markPrice: Number(p.markPx ?? 0),
         unrealizedPnl: Number(p.unrealizedPnl),
         leverage: Number(p.leverage?.value ?? 1),
         notional: Math.abs(Number(p.positionValue ?? size * Number(p.entryPx))),
@@ -188,6 +188,70 @@ async function fetchHyperliquid() {
     };
   } catch (err) {
     return { source: "Hyperliquid", error: err.message };
+  }
+}
+
+// ─── OKX (read-only API key + passphrase) ─────────────────────────────────────
+//
+// OKX is the recommended CEX for users in regions where Binance is blocked
+// (Russia/CIS). Signing differs from Binance/Bybit — uses base64-encoded
+// HMAC over `timestamp + method + path + body`, and requires a passphrase
+// you set when creating the key (separate from API key/secret).
+
+async function fetchOkx() {
+  const apiKey = process.env.OKX_API_KEY;
+  const apiSecret = process.env.OKX_API_SECRET;
+  const passphrase = process.env.OKX_PASSPHRASE;
+  if (!apiKey || !apiSecret || !passphrase) return null;
+
+  function sign(timestamp, method, path) {
+    const message = `${timestamp}${method}${path}`;
+    return crypto.createHmac("sha256", apiSecret).update(message).digest("base64");
+  }
+  async function call(method, path) {
+    const timestamp = new Date().toISOString();
+    return getJson(`https://www.okx.com${path}`, {
+      method,
+      headers: {
+        "OK-ACCESS-KEY": apiKey,
+        "OK-ACCESS-SIGN": sign(timestamp, method, path),
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": passphrase,
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  try {
+    const [positionsResp, balanceResp] = await Promise.all([
+      call("GET", "/api/v5/account/positions"),
+      call("GET", "/api/v5/account/balance"),
+    ]);
+
+    const positions = positionsResp?.data ?? [];
+    const open = positions
+      .filter(p => Math.abs(Number(p.pos)) > 0)
+      .map(p => ({
+        symbol: p.instId,
+        side: Number(p.pos) > 0 ? "LONG" : "SHORT",
+        size: Math.abs(Number(p.pos)),
+        entryPrice: Number(p.avgPx),
+        markPrice: Number(p.markPx),
+        unrealizedPnl: Number(p.upl),
+        leverage: Number(p.lever),
+        notional: Math.abs(Number(p.notionalUsd ?? Math.abs(Number(p.pos)) * Number(p.markPx))),
+      }));
+
+    const totalEq = Number(balanceResp?.data?.[0]?.totalEq ?? 0);
+    return {
+      source: "OKX",
+      walletBalance: totalEq,
+      marginBalance: totalEq,
+      unrealizedPnl: open.reduce((s, p) => s + p.unrealizedPnl, 0),
+      open,
+    };
+  } catch (err) {
+    return { source: "OKX", error: err.message };
   }
 }
 
@@ -235,6 +299,7 @@ async function main() {
   const snaps = (await Promise.all([
     fetchBinance(),
     fetchBybit(),
+    fetchOkx(),
     fetchHyperliquid(),
   ])).filter(Boolean);
 

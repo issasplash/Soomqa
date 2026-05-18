@@ -55,19 +55,27 @@ GitHub Actions опрашивает источники каждые 5 минут
 
 ### Создание read-only ключей
 
-**Binance Futures:**
+> **Для пользователей в России / CIS:** Binance официально недоступен. Используй **Bybit + OKX + Hyperliquid** — этого достаточно. Скрипт автоматически пропустит источники без secrets.
+
+**Binance Futures** (недоступен в РФ без VPN):
 1. Зайти в Binance → Profile → API Management → Create API
 2. Включить только **Enable Reading** + **Enable Futures**
 3. **Снять галочки** с Enable Trading, Enable Withdrawals, Permits Universal Transfer
-4. Если просит IP whitelist — можно оставить пустым (read-only ключ безопасен) или указать `Unrestricted`
-5. Сохранить **API Key** и **Secret Key**
+4. Сохранить **API Key** и **Secret Key**
 
-**Bybit Unified:**
+**Bybit Unified** (работает в РФ):
 1. Bybit → Profile → API → Create New Key
 2. **System-generated key**, **Read-Only**
 3. Permissions: только **Contract → Position** и **Wallet → Account Transfer (Read)**
 4. Никаких Trade или Withdraw
 5. Сохранить **API Key** и **Secret**
+
+**OKX** (работает в РФ, основная замена Binance):
+1. OKX → Profile → API → Create V5 API key
+2. Permission: **Read** (только)
+3. Указать **API Passphrase** — это третий компонент кроме key/secret, **придумай** строку, запиши
+4. **IP whitelist** — оставь пустым (read-only ключ безопасен)
+5. Сохранить **API Key**, **Secret Key** и **Passphrase**
 
 **Hyperliquid:** просто скопируй адрес кошелька с которого торгуешь (`0x...`).
 
@@ -75,17 +83,20 @@ GitHub Actions опрашивает источники каждые 5 минут
 
 В **Settings → Secrets and variables → Actions** добавить нужные:
 
-| Secret | Значение |
-|---|---|
-| `BINANCE_API_KEY` | твой read-only ключ Binance |
-| `BINANCE_API_SECRET` | секрет (показывается **только один раз** при создании) |
-| `BYBIT_API_KEY` | read-only ключ Bybit |
-| `BYBIT_API_SECRET` | секрет Bybit |
-| `HYPERLIQUID_ADDRESS` | публичный адрес кошелька |
-| `TELEGRAM_BOT_TOKEN` | (уже настроен для алертов) |
-| `TELEGRAM_CHAT_ID` | (уже настроен) |
+| Secret | Значение | Обязательность |
+|---|---|---|
+| `BYBIT_API_KEY` | read-only ключ Bybit | для Bybit |
+| `BYBIT_API_SECRET` | секрет Bybit | для Bybit |
+| `OKX_API_KEY` | read-only ключ OKX | для OKX |
+| `OKX_API_SECRET` | секрет OKX | для OKX |
+| `OKX_PASSPHRASE` | passphrase OKX | для OKX |
+| `HYPERLIQUID_ADDRESS` | публичный адрес кошелька | для HL |
+| `BINANCE_API_KEY` | read-only ключ Binance | опционально |
+| `BINANCE_API_SECRET` | секрет Binance | опционально |
+| `TELEGRAM_BOT_TOKEN` | (уже настроен для алертов) | да |
+| `TELEGRAM_CHAT_ID` | (уже настроен) | да |
 
-Можно настроить **только одну биржу** — остальные просто пропустятся в скане.
+Можно настроить **только одну биржу** — остальные пропустятся в скане.
 
 После добавления — **Actions → Portfolio scan → Run workflow** для проверки.
 
