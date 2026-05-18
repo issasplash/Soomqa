@@ -238,8 +238,9 @@ tbody tr.data-row.expanded {
   background: #13131a;
   border: 1px solid #252533;
   border-radius: 6px;
-  padding: 4px;
-  overflow: hidden;
+  padding: 4px 4px 12px 4px;  /* extra bottom padding so the bottom-touching marker isn't clipped by the border */
+  /* IMPORTANT: don't set overflow: hidden here — the tooltip floats *above*
+     the chart and gets clipped otherwise. The :wrap is what we anchor it to. */
 }
 .sparkline-wrap {
   position: relative;
