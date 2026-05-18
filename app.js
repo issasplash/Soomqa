@@ -460,173 +460,228 @@ function applyFilters(rows) {
 
 // ─── Yield calculator ─────────────────────────────────────────────────────────
 //
-// Click a row → a panel drops underneath showing how much that yield is worth
-// on a given amount for a given holding period, AFTER realistic fees. Honesty
-// matters here: a 100% APR funding rate held for 1 day on $500 sounds great
-// until you net it against 0.20% round-trip fees (4 trades × ~0.05%).
+// Click a row → a panel drops underneath. The user enters ONLY the amount.
+// The calculator then projects the position across all relevant horizons,
+// computes break-even (when entry/exit fees pay off), and recommends the
+// horizon that maximises net APY after fees.
+//
+// Honesty principle: a "39% APR" funding rate is misleading for short holds.
+// $500 × 39% APR × 1 cycle = $0.18 gross; $1.00 round-trip fees = $0.82 LOSS.
+// The horizon table makes this obvious instead of hiding it behind one number.
 
-// Fee model per category. round-trip = open both legs and close both legs.
 function feesForCategory(category, amount) {
   switch (category) {
-    case "funding-rate":
-      // 4 taker trades × ~0.05% = 0.20% round-trip on a delta-neutral position.
-      return amount * 0.002;
-    case "delta-neutral":
-      // Ethena: ~0.10% in/out via direct mint/redeem.
-      return amount * 0.001;
-    case "fixed-yield":
-      // Pendle: ~0.10% to enter PT, ~0.10% to exit early. If held to maturity,
-      // exit fee is zero (PT settles 1:1). Conservative: 0.10%.
-      return amount * 0.001;
-    case "stable-lending":
-    case "restaking":
-      // No trade fees; gas only, which is ~$1-3 on Base / L2s. Negligible vs
-      // the headline numbers, so we round to 0 in the calculator.
-      return 0;
-    default:
-      return 0;
+    case "funding-rate":   return amount * 0.002;   // 4 taker trades × 0.05%
+    case "delta-neutral":  return amount * 0.001;   // Ethena mint/redeem
+    case "fixed-yield":    return amount * 0.001;   // Pendle PT entry/exit
+    case "stable-lending": return 0;                // gas only; ≈ 0
+    case "restaking":      return 0;
+    default:               return 0;
   }
 }
 
-function unitLabelForCategory(category) {
-  // What does "1 unit of holding" mean for this row?
-  // Funding rates accrue per funding cycle (8h on Binance/Bybit, 1h on HL).
-  // Everything else: per day.
-  return category === "funding-rate" ? "циклов" : "дней";
+// Horizons we project for each category. The "cycle" for funding rates is a
+// real-world artefact (8h on Binance/Bybit, 1h on Hyperliquid) so we surface
+// it explicitly — it's the shortest unit at which funding can be captured.
+function horizonsFor(row) {
+  if (row.category === "funding-rate") {
+    const cycleHours = row.source === "Hyperliquid" ? 1 : 8;
+    const cycleDays = cycleHours / 24;
+    return [
+      { label: `1 цикл (${cycleHours}ч)`, days: cycleDays },
+      { label: "1 день",   days: 1 },
+      { label: "1 неделя", days: 7 },
+      { label: "1 месяц",  days: 30 },
+      { label: "1 год",    days: 365 },
+    ];
+  }
+  if (row.category === "fixed-yield") {
+    return [
+      { label: "1 неделя", days: 7 },
+      { label: "1 месяц",  days: 30 },
+      { label: "3 месяца", days: 90 },
+      { label: "До maturity (≈6 мес)", days: 180 },
+      { label: "1 год",    days: 365 },
+    ];
+  }
+  // Stable lending, restaking, delta-neutral — same set, days-based.
+  return [
+    { label: "1 день",   days: 1 },
+    { label: "1 неделя", days: 7 },
+    { label: "1 месяц",  days: 30 },
+    { label: "3 месяца", days: 90 },
+    { label: "1 год",    days: 365 },
+  ];
 }
 
-function dailyMultiplierForCategory(category, source) {
-  // Convert APR (annualised %) → fraction earned per "unit".
-  if (category === "funding-rate") {
-    const cyclesPerYear = source === "Hyperliquid" ? 24 * 365 : 3 * 365;
-    return 1 / cyclesPerYear;
+// Returns: { gross, net, netApy, isProfit }
+function projectAt(row, amount, days) {
+  const apr = row.apr / 100;
+  const gross = amount * apr * (days / 365);
+  const fees = feesForCategory(row.category, amount);
+  const net = gross - fees;
+  // Annualised return on capital, net of fees, at this horizon.
+  const netApy = days > 0 && amount > 0 ? (net / amount) * (365 / days) * 100 : 0;
+  return { gross, fees, net, netApy, isProfit: net > 0.01 };
+}
+
+// How long until accumulated yield covers the entry/exit fees? In days.
+// Returns null if APR is non-positive or there are no fees (instantly free).
+function breakEvenDays(row, amount) {
+  const fees = feesForCategory(row.category, amount);
+  if (fees <= 0) return 0;
+  const apr = row.apr / 100;
+  if (apr <= 0 || amount <= 0) return null;
+  const yieldPerDay = amount * apr / 365;
+  return fees / yieldPerDay;
+}
+
+// Translate days to a human label that respects the row's natural cadence.
+function formatDuration(days, row) {
+  if (days == null) return "—";
+  if (row.category === "funding-rate") {
+    const cycleHours = row.source === "Hyperliquid" ? 1 : 8;
+    const cycles = (days * 24) / cycleHours;
+    if (cycles < 1)  return `<1 цикла (${(cycles * cycleHours).toFixed(1)}ч)`;
+    if (cycles < 24) return `${cycles.toFixed(1)} циклов (${(cycles * cycleHours / 24).toFixed(1)}д)`;
   }
-  return 1 / 365;
+  if (days < 1)   return `${(days * 24).toFixed(1)}ч`;
+  if (days < 7)   return `${days.toFixed(1)} д`;
+  if (days < 30)  return `${(days / 7).toFixed(1)} нед`;
+  if (days < 365) return `${(days / 30).toFixed(1)} мес`;
+  return `${(days / 365).toFixed(1)} лет`;
 }
 
 function renderCalculator(row) {
   const state = ensureCalcState(row);
-  const amount = Number(state.amount) || 0;
-  const periods = Number(state.periods) || 0;
-  const aprFrac = row.apr / 100;
-  const perUnit = dailyMultiplierForCategory(row.category, row.source);
-  const gross = amount * aprFrac * perUnit * periods;
+  const amount = Math.max(0, Number(state.amount) || 0);
   const fees = feesForCategory(row.category, amount);
-  const net = gross - fees;
-  const netClass = net > 0.01 ? "pos" : net < -0.01 ? "neg" : "neutral";
-  const unitLabel = unitLabelForCategory(row.category);
+  const horizons = horizonsFor(row);
+  const projections = horizons.map(h => ({ ...h, ...projectAt(row, amount, h.days) }));
+  const breakDays = breakEvenDays(row, amount);
 
-  // Build the formula string — same shape every time, just numbers swap in.
-  const aprStr = `${row.apr.toFixed(2)}%`;
-  const formula = row.category === "funding-rate"
-    ? `gross = $${amount.toFixed(0)} × ${aprStr} ÷ ${row.source === "Hyperliquid" ? "8760" : "1095"} цикл/год × ${periods} цикл = $${gross.toFixed(2)}`
-    : `gross = $${amount.toFixed(0)} × ${aprStr} ÷ 365 дн/год × ${periods} дн = $${gross.toFixed(2)}`;
+  // Best horizon = highest net APY *among profitable ones*. If none profitable,
+  // recommend skipping (or holding for break-even).
+  let bestIdx = -1;
+  for (let i = 0; i < projections.length; i++) {
+    if (!projections[i].isProfit) continue;
+    if (bestIdx === -1 || projections[i].netApy > projections[bestIdx].netApy) bestIdx = i;
+  }
+
+  const variableNote = (row.category === "funding-rate" || row.category === "delta-neutral")
+    ? `<span class="calc-warning">⚠ APR переменная — расчёт предполагает, что ставка не изменится</span>`
+    : (row.category === "stable-lending"
+      ? `<span class="calc-warning">⚠ APY меняется, но обычно в пределах ±2%</span>`
+      : `<span class="calc-warning">✓ Доходность зафиксирована до даты maturity</span>`);
+
+  const rows = projections.map((p, i) => {
+    const netClass = p.isProfit ? "pos" : "neg";
+    const netSign = p.net >= 0 ? "" : "−";
+    const apyClass = p.isProfit ? "pos" : "neg";
+    const star = i === bestIdx ? '<span class="calc-star" title="Лучший горизонт по net APY">★</span>' : "";
+    return `
+      <tr class="${i === bestIdx ? "calc-best" : ""}">
+        <td>${star}${p.label}</td>
+        <td class="num">$${p.gross.toFixed(2)}</td>
+        <td class="num neg">−$${p.fees.toFixed(2)}</td>
+        <td class="num ${netClass}">${netSign}$${Math.abs(p.net).toFixed(2)}</td>
+        <td class="num ${apyClass}">${p.netApy >= 0 ? "" : "−"}${Math.abs(p.netApy).toFixed(1)}%</td>
+      </tr>
+    `;
+  }).join("");
+
+  const breakLine = (breakDays == null)
+    ? `<div class="calc-recommendation">Окупаемость не достижима при текущем APR.</div>`
+    : breakDays === 0
+      ? `<div class="calc-recommendation">⚡ Fees нет — доходность чистая с первого дня.</div>`
+      : `<div class="calc-recommendation">⚡ Break-even: <b>${formatDuration(breakDays, row)}</b> (когда заработок покрывает fees ${fees.toFixed(2)}$)</div>`;
+
+  const verdict = bestIdx >= 0
+    ? `<div class="calc-recommendation">🎯 Оптимально: <b>${escapeHtml(projections[bestIdx].label)}</b> — net APY <b>${projections[bestIdx].netApy.toFixed(1)}%</b></div>`
+    : `<div class="calc-recommendation neg">🚫 На сумме $${amount.toFixed(0)} ни один горизонт не окупается. Нужна сумма больше или APR выше.</div>`;
 
   return `
     <div class="calc-panel" data-calc-for="${row._idx}">
-      <div class="calc-field">
-        <label>Сумма (USD)</label>
-        <input type="number" inputmode="decimal" min="1" step="50" data-calc-input="amount" value="${escapeHtml(state.amount)}">
-      </div>
-      <div class="calc-field">
-        <label>${unitLabel}</label>
-        <input type="number" inputmode="decimal" min="0.1" step="1" data-calc-input="periods" value="${escapeHtml(state.periods)}">
-      </div>
-      <div>
-        <div class="calc-result">
-          <span><span class="lbl">gross</span> $${gross.toFixed(2)}</span>
-          <span><span class="lbl">fees</span> −$${fees.toFixed(2)}</span>
-          <span><span class="lbl">net</span> <span class="${netClass}">${net >= 0 ? "" : "−"}$${Math.abs(net).toFixed(2)}</span></span>
-          ${gross > 0 ? `<span class="lbl">${((net / amount) * 100).toFixed(3)}% от капитала</span>` : ""}
+      <div class="calc-input-row">
+        <div class="calc-field">
+          <label>Сумма (USD)</label>
+          <input type="number" inputmode="decimal" min="1" step="100" data-calc-input="amount" value="${escapeHtml(state.amount)}">
         </div>
-        <div class="calc-formula">${formula} · fees учитывают ${row.category === "funding-rate" ? "4 take-сделки 0.05%" : row.category === "delta-neutral" ? "mint+redeem Ethena" : row.category === "fixed-yield" ? "вход/выход Pendle" : "только gas (≈0)"}</div>
+        <div class="calc-summary">
+          <span class="calc-summary-label">APR:</span> <b>${row.apr.toFixed(2)}%</b>
+          <span class="calc-summary-label">·  Fees входа/выхода:</span> <b>$${fees.toFixed(2)}</b>
+        </div>
       </div>
+      <div class="calc-table-wrap">
+        <table class="calc-table">
+          <thead>
+            <tr>
+              <th>Горизонт</th>
+              <th class="num">Gross</th>
+              <th class="num">Fees</th>
+              <th class="num">Net</th>
+              <th class="num">Net APY</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${breakLine}
+      ${verdict}
+      <div class="calc-formula">${variableNote}</div>
     </div>
   `;
 }
 
-const calcStates = new Map();  // row "key" → { amount, periods }
+const calcStates = new Map();  // row "key" → { amount }
 function calcKey(row) {
   return `${row.source}|${row.market}|${row.category}`;
 }
 function ensureCalcState(row) {
   const key = calcKey(row);
   if (!calcStates.has(key)) {
-    calcStates.set(key, {
-      amount: "500",
-      periods: row.category === "funding-rate" ? "1" : "30",
-    });
+    calcStates.set(key, { amount: "500" });
   }
   return calcStates.get(key);
 }
 
 function wireCalculatorListeners() {
-  // Row click → toggle expansion
   els.rows.querySelectorAll("tr.data-row").forEach(tr => {
     tr.addEventListener("click", e => {
-      // Don't toggle when clicking inside an open calc panel
       if (e.target.closest(".calc-panel")) return;
       const idx = Number(tr.dataset.rowIndex);
       state.expandedRowIndex = state.expandedRowIndex === idx ? null : idx;
       render();
     });
   });
-  // Calculator inputs
   els.rows.querySelectorAll(".calc-panel input[data-calc-input]").forEach(input => {
-    input.addEventListener("input", e => {
-      e.stopPropagation();
-      const panel = input.closest(".calc-panel");
-      const rowIdx = Number(panel.dataset.calcFor);
-      const row = state.visibleRows[rowIdx];
-      if (!row) return;
-      const cstate = ensureCalcState(row);
-      cstate[input.dataset.calcInput] = input.value;
-      // Local re-render of only this panel — full re-render would steal focus
-      // from the input the user is typing in.
-      const newHtml = renderCalculator(row);
-      const wrapper = document.createElement("tbody");
-      wrapper.innerHTML = `<tr class="calc-row"><td colspan="6">${newHtml}</td></tr>`;
-      const newPanel = wrapper.querySelector(".calc-panel");
-      panel.replaceWith(newPanel);
-      // Restore focus + cursor position
-      const which = input.dataset.calcInput;
-      const restored = newPanel.querySelector(`input[data-calc-input="${which}"]`);
-      if (restored) {
-        restored.focus();
-        try { restored.setSelectionRange(input.selectionStart, input.selectionEnd); } catch {}
-      }
-      wireSinglePanel(newPanel);
-    });
-    input.addEventListener("click", e => e.stopPropagation());
+    attachCalcInputListener(input);
   });
 }
 
-// After we manually swap in a panel (during input typing), re-wire the
-// listeners on the new node so further keystrokes keep working.
-function wireSinglePanel(panel) {
-  panel.querySelectorAll("input[data-calc-input]").forEach(input => {
-    input.addEventListener("input", e => {
-      e.stopPropagation();
-      const rowIdx = Number(panel.dataset.calcFor);
-      const row = state.visibleRows[rowIdx];
-      if (!row) return;
-      const cstate = ensureCalcState(row);
-      cstate[input.dataset.calcInput] = input.value;
-      const newHtml = renderCalculator(row);
-      const wrapper = document.createElement("tbody");
-      wrapper.innerHTML = `<tr class="calc-row"><td colspan="6">${newHtml}</td></tr>`;
-      const newPanel = wrapper.querySelector(".calc-panel");
-      panel.replaceWith(newPanel);
-      const which = input.dataset.calcInput;
-      const restored = newPanel.querySelector(`input[data-calc-input="${which}"]`);
-      if (restored) {
-        restored.focus();
-        try { restored.setSelectionRange(input.selectionStart, input.selectionEnd); } catch {}
-      }
-      wireSinglePanel(newPanel);
-    });
-    input.addEventListener("click", e => e.stopPropagation());
+function attachCalcInputListener(input) {
+  input.addEventListener("input", e => {
+    e.stopPropagation();
+    const panel = input.closest(".calc-panel");
+    const rowIdx = Number(panel.dataset.calcFor);
+    const row = state.visibleRows[rowIdx];
+    if (!row) return;
+    const cstate = ensureCalcState(row);
+    cstate[input.dataset.calcInput] = input.value;
+    const newHtml = renderCalculator(row);
+    const wrapper = document.createElement("tbody");
+    wrapper.innerHTML = `<tr class="calc-row"><td colspan="6">${newHtml}</td></tr>`;
+    const newPanel = wrapper.querySelector(".calc-panel");
+    panel.replaceWith(newPanel);
+    const which = input.dataset.calcInput;
+    const restored = newPanel.querySelector(`input[data-calc-input="${which}"]`);
+    if (restored) {
+      restored.focus();
+      try { restored.setSelectionRange(input.selectionStart, input.selectionEnd); } catch {}
+    }
+    newPanel.querySelectorAll("input[data-calc-input]").forEach(attachCalcInputListener);
   });
+  input.addEventListener("click", e => e.stopPropagation());
 }
 
 function render() {
