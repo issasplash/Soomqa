@@ -70,12 +70,26 @@ const PERP_LIQUID_VOLUME_USD = 10_000_000;
 // (e.g. weekend). At least one of the two has to clear the floor.
 const PERP_LIQUID_OI_USD = 5_000_000;
 
-function makePerpRow({ source, market, quote, apr, period, volumeUsd, openInterestUsd }) {
-  const liquid = (volumeUsd >= PERP_LIQUID_VOLUME_USD) ||
-                 (openInterestUsd >= PERP_LIQUID_OI_USD);
+// Basis = (markPrice - indexPrice) / indexPrice — i.e. how far the perp is
+// trading above/below spot. A perp with 130% APR funding but no basis means
+// funding already paid out; basis > 0.3% means there's still an active spread
+// that the next funding cycle will arbitrage away. Treat such markets as
+// non-sustainable signals regardless of volume — even Circle/Tesla equity
+// perps can briefly clear $50M/day on a news spike.
+const PERP_SPIKE_BASIS_THRESHOLD = 0.003;
+
+function makePerpRow({ source, market, quote, apr, period, volumeUsd, openInterestUsd, basis }) {
+  const hasDepth = (volumeUsd >= PERP_LIQUID_VOLUME_USD) ||
+                   (openInterestUsd >= PERP_LIQUID_OI_USD);
+  const inActiveSpike = basis != null && Math.abs(basis) > PERP_SPIKE_BASIS_THRESHOLD;
+  const liquid = hasDepth && !inActiveSpike;
+
   const noteParts = [`${period} funding`];
-  if (!liquid) {
+  if (!hasDepth) {
     noteParts.push("тонкая ликвидность — APR быстро меняется");
+  } else if (inActiveSpike) {
+    const basisPct = (basis * 100).toFixed(2);
+    noteParts.push(`mark выше спота на ${basisPct}% — funding скорректируется`);
   } else if (volumeUsd > 0) {
     noteParts.push(`оборот ${formatUsdShort(volumeUsd)}/24ч`);
   }
@@ -86,7 +100,7 @@ function makePerpRow({ source, market, quote, apr, period, volumeUsd, openIntere
     fixed: false,
     liquid,
     note: noteParts.join(" · "),
-    volumeUsd, openInterestUsd,
+    volumeUsd, openInterestUsd, basis,
   };
 }
 
@@ -118,11 +132,16 @@ async function fetchBinance() {
         const quote = r.symbol.endsWith("USDC") ? "USDC" : "USDT";
         const market = r.symbol.replace(new RegExp(`${quote}$`), "");
         const apr = Number(r.lastFundingRate) * APR_8H * 100;
+        // premiumIndex includes markPrice and indexPrice on every row.
+        const markPrice = Number(r.markPrice) || 0;
+        const indexPrice = Number(r.indexPrice) || 0;
+        const basis = indexPrice > 0 ? (markPrice - indexPrice) / indexPrice : null;
         return makePerpRow({
           source: "Binance",
           market, quote, apr, period: "8h",
           volumeUsd: volumeBy.get(r.symbol) ?? 0,
-          openInterestUsd: 0,  // Binance OI is a separate per-symbol call; skip for now.
+          openInterestUsd: 0,
+          basis,
         });
       });
     return { ok: true, data: rows };
@@ -148,11 +167,16 @@ async function fetchBybit() {
           market = market.replace(/USDT$/, "");
         }
         const apr = Number(r.fundingRate) * APR_8H * 100;
+        // Bybit gives lastPrice + indexPrice; same basis idea.
+        const lastPrice = Number(r.lastPrice) || 0;
+        const indexPrice = Number(r.indexPrice) || 0;
+        const basis = indexPrice > 0 ? (lastPrice - indexPrice) / indexPrice : null;
         return makePerpRow({
           source: "Bybit",
           market, quote, apr, period: "8h",
           volumeUsd: Number(r.turnover24h) || 0,
           openInterestUsd: Number(r.openInterestValue) || 0,
+          basis,
         });
       });
     return { ok: true, data: rows };
@@ -174,6 +198,8 @@ async function fetchHyperliquid() {
       if (!asset || !ctx) continue;
       const apr = Number(ctx.funding) * APR_1H * 100;
       const markPx = Number(ctx.markPx) || 0;
+      const oraclePx = Number(ctx.oraclePx) || 0;
+      const basis = oraclePx > 0 ? (markPx - oraclePx) / oraclePx : null;
       // openInterest on HL is in base units; convert with mark price.
       const oiUsd = (Number(ctx.openInterest) || 0) * markPx;
       rows.push(makePerpRow({
@@ -181,9 +207,9 @@ async function fetchHyperliquid() {
         market: asset.name,
         quote: "USDC",
         apr, period: "1h",
-        // `dayNtlVlm` is already in USD (notional volume).
         volumeUsd: Number(ctx.dayNtlVlm) || 0,
         openInterestUsd: oiUsd,
+        basis,
       }));
     }
     return { ok: true, data: rows };
