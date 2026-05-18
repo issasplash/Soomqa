@@ -244,6 +244,94 @@ async function fetchHyperliquid() {
   }
 }
 
+// MEXC contract — public bulk funding endpoint (one call returns all perps).
+async function fetchMexcFunding() {
+  try {
+    const [fundings, tickers] = await Promise.all([
+      getJson("https://contract.mexc.com/api/v1/contract/funding_rate/all"),
+      getJson("https://contract.mexc.com/api/v1/contract/ticker"),
+    ]);
+    const volumeBy = new Map();
+    for (const t of (tickers?.data ?? [])) {
+      // amount24 = 24h turnover in quote currency (USDT)
+      volumeBy.set(t.symbol, Number(t.amount24) || 0);
+    }
+    const rows = (fundings?.data ?? []).map(r => {
+      const apr = Number(r.fundingRate ?? 0) * APR_8H * 100;
+      const market = r.symbol.replace(/_USDT$/, "");
+      return makePerpRow({
+        source: "MEXC",
+        market,
+        quote: "USDT",
+        apr,
+        period: "8h",
+        volumeUsd: volumeBy.get(r.symbol) ?? 0,
+        openInterestUsd: 0,
+        basis: null,
+      });
+    });
+    return { ok: true, data: rows };
+  } catch (err) {
+    return { ok: false, source: "MEXC", error: err.message };
+  }
+}
+
+// Gate.io USDT-margined futures — public, single request returns all
+// contracts with funding_rate, mark/index price, and 24h turnover.
+async function fetchGateFunding() {
+  try {
+    const data = await getJson("https://api.gateio.ws/api/v4/futures/usdt/contracts");
+    const rows = (Array.isArray(data) ? data : []).map(r => {
+      // Some Gate contracts use 1h funding interval, most are 8h. Derive
+      // the period from `funding_interval` (seconds) so APR is correct.
+      const intervalSec = Number(r.funding_interval) || 28800;
+      const periodsPerYear = (365 * 24 * 3600) / intervalSec;
+      const apr = Number(r.funding_rate ?? 0) * periodsPerYear * 100;
+      const market = r.name.replace(/_USDT$/, "");
+      const markPrice = Number(r.mark_price ?? 0);
+      const indexPrice = Number(r.index_price ?? 0);
+      const basis = indexPrice > 0 ? (markPrice - indexPrice) / indexPrice : null;
+      return makePerpRow({
+        source: "Gate.io",
+        market,
+        quote: "USDT",
+        apr,
+        period: intervalSec === 3600 ? "1h" : "8h",
+        volumeUsd: Number(r.trade_size_24h_usd ?? 0),
+        openInterestUsd: 0,
+        basis,
+      });
+    });
+    return { ok: true, data: rows };
+  } catch (err) {
+    return { ok: false, source: "Gate.io", error: err.message };
+  }
+}
+
+// HTX (formerly Huobi) linear USDT swaps — public batch endpoint.
+async function fetchHtxFunding() {
+  try {
+    const data = await getJson("https://api.hbdm.com/linear-swap-api/v1/swap_batch_funding_rate");
+    const rows = (data?.data ?? []).map(r => {
+      const apr = Number(r.funding_rate ?? 0) * APR_8H * 100;
+      const market = r.contract_code.replace(/-USDT$/, "");
+      return makePerpRow({
+        source: "HTX",
+        market,
+        quote: "USDT",
+        apr,
+        period: "8h",
+        volumeUsd: 0,
+        openInterestUsd: 0,
+        basis: null,
+      });
+    });
+    return { ok: true, data: rows };
+  } catch (err) {
+    return { ok: false, source: "HTX", error: err.message };
+  }
+}
+
 // DefiLlama aggregated yields — Aave, Morpho, Pendle, Ethena, Sky, etc.
 // One endpoint, ~13,000 pools. We filter aggressively here because the raw
 // feed includes scam tokens with names like "1337USDC" or "ADPUSDC" that
@@ -1752,6 +1840,9 @@ async function refreshData() {
     fetchBinance(),
     fetchBybit(),
     fetchHyperliquid(),
+    fetchMexcFunding(),
+    fetchGateFunding(),
+    fetchHtxFunding(),
     fetchDefiLlama(),
   ]);
 

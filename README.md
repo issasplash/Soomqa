@@ -154,6 +154,9 @@ Vanilla JS, без сборки, без фреймворков, без backend.
 | Binance | `fapi.binance.com/fapi/v1/{premiumIndex,ticker/24hr,exchangeInfo}` | Все USDT/USDC perp funding rates + volume + контракт-метаданные |
 | Bybit | `api.bybit.com/v5/market/tickers?category=linear` | Все linear perp funding rates + turnover + OI |
 | Hyperliquid | `api.hyperliquid.xyz/info` (POST) | Все HL perp funding rates + дневной объём + OI + oraclePx |
+| MEXC | `contract.mexc.com/api/v1/contract/funding_rate/all + ticker` | Все MEXC futures funding rates + объём |
+| Gate.io | `api.gateio.ws/api/v4/futures/usdt/contracts` | Все Gate USDT-perp funding + mark/index price (basis) + 24h volume |
+| HTX | `api.hbdm.com/linear-swap-api/v1/swap_batch_funding_rate` | Все HTX linear USDT swaps |
 | DefiLlama | `yields.llama.fi/pools` | Aave, Morpho, Pendle, Ethena, restaking LRTs, и т.д. |
 
 Все endpoints публичные и CORS-friendly. Если один источник падает — остальные рендерятся, ошибка показывается баннером.
