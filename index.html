@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0a0a0f" />
-  <title>Soomqa — Yield Monitor</title>
+  <title>Soomqa — Монитор доходностей</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -32,12 +32,12 @@
     <header class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
       <div>
         <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Soomqa</h1>
-        <p class="text-zinc-400 text-sm mt-1">Crypto yield monitor — all funding rates and DeFi APYs in one view.</p>
+        <p class="text-zinc-400 text-sm mt-1">Монитор крипто-доходностей — funding rates и DeFi APY в одной таблице.</p>
       </div>
       <div class="flex items-center gap-3 text-xs text-zinc-500">
-        <span id="last-updated">Loading…</span>
-        <button id="refresh" class="px-4 py-2 sm:py-1.5 bg-bg-card border border-border rounded-md hover:border-accent text-zinc-300 hover:text-white transition min-h-[36px]" aria-label="Refresh">
-          ↻ Refresh
+        <span id="last-updated">Загрузка…</span>
+        <button id="refresh" class="px-4 py-2 sm:py-1.5 bg-bg-card border border-border rounded-md hover:border-accent text-zinc-300 hover:text-white transition min-h-[36px]" aria-label="Обновить">
+          ↻ Обновить
         </button>
       </div>
     </header>
@@ -45,22 +45,22 @@
     <!-- Summary cards -->
     <section id="summary" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       <div class="bg-bg-card border border-border rounded-lg p-3">
-        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Best overall</div>
+        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Лучший в целом</div>
         <div id="sum-best-apr" class="text-xl font-semibold mt-1 font-mono">—</div>
         <div id="sum-best-src" class="text-xs text-zinc-400 mt-0.5 truncate">—</div>
       </div>
       <div class="bg-bg-card border border-border rounded-lg p-3">
-        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Best fixed yield</div>
+        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Лучшая фикс. доходность</div>
         <div id="sum-fixed-apr" class="text-xl font-semibold mt-1 font-mono">—</div>
         <div id="sum-fixed-src" class="text-xs text-zinc-400 mt-0.5 truncate">—</div>
       </div>
       <div class="bg-bg-card border border-border rounded-lg p-3">
-        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Best stable lending</div>
+        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Лучший лендинг стейблов</div>
         <div id="sum-stable-apr" class="text-xl font-semibold mt-1 font-mono">—</div>
         <div id="sum-stable-src" class="text-xs text-zinc-400 mt-0.5 truncate">—</div>
       </div>
       <div class="bg-bg-card border border-border rounded-lg p-3">
-        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Markets tracked</div>
+        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Всего рынков</div>
         <div id="sum-count" class="text-xl font-semibold mt-1 font-mono">—</div>
         <div id="sum-sources" class="text-xs text-zinc-400 mt-0.5 truncate">—</div>
       </div>
@@ -73,33 +73,37 @@
           <input
             id="search"
             type="search"
-            placeholder="Search symbol or source (e.g. BTC, ETH, USDC, Pendle)…"
+            placeholder="Поиск по символу или источнику (BTC, ETH, USDC, Pendle…)"
             class="w-full bg-bg-elev border border-border rounded-md px-3 py-2 text-sm placeholder-zinc-500 focus:outline-none focus:border-accent"
             autocomplete="off"
           />
         </div>
         <div class="flex flex-wrap gap-2 items-center">
           <select id="category-filter" class="bg-bg-elev border border-border rounded-md px-2 py-2 text-sm">
-            <option value="">All categories</option>
-            <option value="funding-rate">Funding rate</option>
-            <option value="fixed-yield">Fixed yield</option>
-            <option value="stable-lending">Stable lending</option>
-            <option value="delta-neutral">Δ-neutral</option>
-            <option value="restaking">Restaking</option>
+            <option value="">Все категории</option>
+            <option value="funding-rate">Funding ставка</option>
+            <option value="fixed-yield">Фикс. доходность</option>
+            <option value="stable-lending">Лендинг стейблов</option>
+            <option value="delta-neutral">Δ-нейтрал</option>
+            <option value="restaking">Рестейкинг</option>
           </select>
           <select id="sort-by" class="bg-bg-elev border border-border rounded-md px-2 py-2 text-sm">
             <option value="apr-desc">APR ↓</option>
             <option value="apr-asc">APR ↑</option>
-            <option value="source">Source</option>
-            <option value="market">Market</option>
+            <option value="source">Источник</option>
+            <option value="market">Рынок</option>
           </select>
           <label class="flex items-center gap-2 text-xs text-zinc-400 px-2">
             <input id="min-apr" type="number" step="0.1" min="-1000" placeholder="0" class="w-20 bg-bg-elev border border-border rounded-md px-2 py-1 text-sm" />
-            <span>min APR%</span>
+            <span>мин APR%</span>
           </label>
           <label class="flex items-center gap-2 text-xs text-zinc-400 px-2">
             <input id="max-apr" type="number" step="1" placeholder="∞" class="w-20 bg-bg-elev border border-border rounded-md px-2 py-1 text-sm" />
-            <span>max APR%</span>
+            <span>макс APR%</span>
+          </label>
+          <label class="flex items-center gap-2 text-xs text-zinc-400 px-2 cursor-pointer">
+            <input id="liquid-only" type="checkbox" class="accent-accent" />
+            <span>только ликвидные</span>
           </label>
         </div>
       </div>
@@ -107,7 +111,7 @@
 
     <!-- Errors -->
     <section id="errors" class="hidden bg-amber-950/40 border border-amber-700/50 rounded-lg p-3 mb-4 text-amber-200 text-sm">
-      <div class="font-medium mb-1">Some sources failed:</div>
+      <div class="font-medium mb-1">Часть источников не отвечает:</div>
       <ul id="errors-list" class="text-xs text-amber-300/80 list-disc list-inside"></ul>
     </section>
 
@@ -117,24 +121,24 @@
         <table class="w-full text-sm">
           <thead class="bg-bg-elev text-zinc-400 text-[11px] uppercase tracking-wide">
             <tr>
-              <th class="text-left px-3 py-2 font-medium">Source</th>
-              <th class="text-left px-3 py-2 font-medium">Market</th>
-              <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">Category</th>
+              <th class="text-left px-3 py-2 font-medium">Источник</th>
+              <th class="text-left px-3 py-2 font-medium">Рынок</th>
+              <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">Категория</th>
               <th class="text-right px-3 py-2 font-medium">APR</th>
-              <th class="text-left px-3 py-2 font-medium hidden md:table-cell">Type</th>
-              <th class="text-left px-3 py-2 font-medium hidden lg:table-cell">Note</th>
+              <th class="text-left px-3 py-2 font-medium hidden md:table-cell">Тип</th>
+              <th class="text-left px-3 py-2 font-medium hidden lg:table-cell">Заметка</th>
             </tr>
           </thead>
           <tbody id="rows" class="divide-y divide-border/50">
-            <tr><td colspan="6" class="px-3 py-8 text-center text-zinc-500" id="loading-row">Fetching from 4 sources…</td></tr>
+            <tr><td colspan="6" class="px-3 py-8 text-center text-zinc-500" id="loading-row">Опрашиваем 4 источника…</td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
     <footer class="mt-6 text-xs text-zinc-500 text-center">
-      <p>Read-only public data from Binance, Bybit, Hyperliquid, and DefiLlama. No accounts, no API keys.</p>
-      <p class="mt-1">Auto-refreshes every 60 seconds. <a href="https://github.com/issasplash/soomqa" class="text-accent hover:underline">Source</a></p>
+      <p>Только публичные данные: Binance, Bybit, Hyperliquid, DefiLlama. Без аккаунтов и API-ключей.</p>
+      <p class="mt-1">Автообновление каждые 60 секунд. <a href="https://github.com/issasplash/soomqa" class="text-accent hover:underline">Исходники</a></p>
     </footer>
 
   </div>

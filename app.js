@@ -16,11 +16,11 @@ const APR_1H  = 24 * 365;
 
 const CATEGORY_LABELS = {
   "funding-rate":  { label: "Funding",   badge: "badge-funding" },
-  "fixed-yield":   { label: "Fixed",     badge: "badge-fixed" },
-  "stable-lending":{ label: "Lending",   badge: "badge-lending" },
-  "delta-neutral": { label: "Δ-neutral", badge: "badge-delta" },
-  "restaking":     { label: "Restake",   badge: "badge-restake" },
-  "leveraged-stable": { label: "Lev stbl", badge: "badge-leveraged" },
+  "fixed-yield":   { label: "Фикс.",     badge: "badge-fixed" },
+  "stable-lending":{ label: "Лендинг",   badge: "badge-lending" },
+  "delta-neutral": { label: "Δ-нейтрал", badge: "badge-delta" },
+  "restaking":     { label: "Рестейк",   badge: "badge-restake" },
+  "leveraged-stable": { label: "Лев. стейбл", badge: "badge-leveraged" },
 };
 
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
@@ -46,41 +46,84 @@ async function postJson(url, body, timeoutMs = 15000) {
 }
 
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
+//
+// Each row carries a `liquid` boolean. A row is liquid when there's enough real
+// trading / TVL behind it that the headline APR isn't going to mean-revert
+// inside a day. The signal driving `liquid` differs by source:
+//
+//   CEX funding: 24h quote volume + open interest in USD
+//   DeFi yields: TVL + whether `apyBase` (real yield) is the bulk of the APR
+//                vs `apyReward` (token emissions that decay fast) + the
+//                `outlier` flag DefiLlama already publishes
+//
+// No hardcoded percentage thresholds on APR itself — the page surfaces every
+// market, with the `liquid` flag deciding which feed into summary cards and
+// which get the "thin market" annotation in the table.
 
-// Funding APRs above this are almost always short-lived spikes on thin
-// altcoin/equity perp markets — visible but flagged so the user can spot them.
-const FUNDING_SPIKE_THRESHOLD = 30;
+// Minimum 24h quote volume (in USD) for a perp to be considered deep enough
+// that funding is a sustainable signal. $10M/day is a sane floor: BTC/ETH are
+// in the tens of billions, mid-cap alts hit $50M-$1B, and equity/memecoin
+// perps that produce the 300%+ funding spikes sit below.
+const PERP_LIQUID_VOLUME_USD = 10_000_000;
 
-function fundingNote(apr, period) {
-  const base = `${period} funding`;
-  if (Math.abs(apr) > FUNDING_SPIKE_THRESHOLD) {
-    return `${base} · thin market, mean-reverts fast`;
+// Open interest (USD) backstop in case volume is briefly unrepresentative
+// (e.g. weekend). At least one of the two has to clear the floor.
+const PERP_LIQUID_OI_USD = 5_000_000;
+
+function makePerpRow({ source, market, quote, apr, period, volumeUsd, openInterestUsd }) {
+  const liquid = (volumeUsd >= PERP_LIQUID_VOLUME_USD) ||
+                 (openInterestUsd >= PERP_LIQUID_OI_USD);
+  const noteParts = [`${period} funding`];
+  if (!liquid) {
+    noteParts.push("тонкая ликвидность — APR быстро меняется");
+  } else if (volumeUsd > 0) {
+    noteParts.push(`оборот ${formatUsdShort(volumeUsd)}/24ч`);
   }
-  return base;
+  return {
+    source, market, quote,
+    category: "funding-rate",
+    apr,
+    fixed: false,
+    liquid,
+    note: noteParts.join(" · "),
+    volumeUsd, openInterestUsd,
+  };
 }
 
-// Binance USD-M futures — ALL perpetual markets (typically ~400+).
+function formatUsdShort(v) {
+  if (!Number.isFinite(v)) return "—";
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}k`;
+  return `$${v.toFixed(0)}`;
+}
+
+// Binance USD-M futures — funding rate + 24h volume, joined by symbol.
+// Two parallel calls so we get both data points in one render pass.
 async function fetchBinance() {
   try {
-    const data = await getJson("https://fapi.binance.com/fapi/v1/premiumIndex");
-    const rows = data
-      // Filter out delivery futures (e.g. _240329); keep only perps.
-      .filter(r => !r.symbol.includes("_"))
+    const [funding, tickers] = await Promise.all([
+      getJson("https://fapi.binance.com/fapi/v1/premiumIndex"),
+      getJson("https://fapi.binance.com/fapi/v1/ticker/24hr"),
+    ]);
+    const volumeBy = new Map();
+    for (const t of tickers) {
+      // `quoteVolume` is volume measured in the quote asset (USDT/USDC),
+      // i.e. already in USD-ish terms.
+      volumeBy.set(t.symbol, Number(t.quoteVolume) || 0);
+    }
+    const rows = funding
+      .filter(r => !r.symbol.includes("_"))  // drop delivery futures
       .map(r => {
-        // Anchor the strip to the END of the symbol — replace() without
-        // anchoring would corrupt names like "USDTUSDC" or "1000USDT".
         const quote = r.symbol.endsWith("USDC") ? "USDC" : "USDT";
-        const base = r.symbol.replace(new RegExp(`${quote}$`), "");
+        const market = r.symbol.replace(new RegExp(`${quote}$`), "");
         const apr = Number(r.lastFundingRate) * APR_8H * 100;
-        return {
+        return makePerpRow({
           source: "Binance",
-          market: base,
-          quote,
-          category: "funding-rate",
-          apr,
-          fixed: false,
-          note: fundingNote(apr, "8h"),
-        };
+          market, quote, apr, period: "8h",
+          volumeUsd: volumeBy.get(r.symbol) ?? 0,
+          openInterestUsd: 0,  // Binance OI is a separate per-symbol call; skip for now.
+        });
       });
     return { ok: true, data: rows };
   } catch (err) {
@@ -88,16 +131,14 @@ async function fetchBinance() {
   }
 }
 
-// Bybit V5 linear perps — ALL markets.
+// Bybit V5 linear perps. The /tickers response already includes 24h turnover
+// AND open interest value — no second call needed.
 async function fetchBybit() {
   try {
     const data = await getJson("https://api.bybit.com/v5/market/tickers?category=linear");
     const rows = (data?.result?.list ?? [])
       .filter(r => r.fundingRate != null && r.fundingRate !== "")
       .map(r => {
-        // Bybit linear markets are mostly *USDT, with a handful of inverse-named
-        // PERP markets (e.g. "BTCPERP" for USDC-margined). Strip the suffix only
-        // if it sits at the end of the symbol.
         let market = r.symbol;
         let quote = "USDT";
         if (market.endsWith("PERP")) {
@@ -107,15 +148,12 @@ async function fetchBybit() {
           market = market.replace(/USDT$/, "");
         }
         const apr = Number(r.fundingRate) * APR_8H * 100;
-        return {
+        return makePerpRow({
           source: "Bybit",
-          market,
-          quote,
-          category: "funding-rate",
-          apr,
-          fixed: false,
-          note: fundingNote(apr, "8h"),
-        };
+          market, quote, apr, period: "8h",
+          volumeUsd: Number(r.turnover24h) || 0,
+          openInterestUsd: Number(r.openInterestValue) || 0,
+        });
       });
     return { ok: true, data: rows };
   } catch (err) {
@@ -123,7 +161,8 @@ async function fetchBybit() {
   }
 }
 
-// Hyperliquid — all listed perp markets, hourly funding.
+// Hyperliquid — `metaAndAssetCtxs` already includes daily notional volume
+// and open interest per market.
 async function fetchHyperliquid() {
   try {
     const data = await postJson("https://api.hyperliquid.xyz/info", { type: "metaAndAssetCtxs" });
@@ -134,15 +173,18 @@ async function fetchHyperliquid() {
       const ctx = ctxs[i];
       if (!asset || !ctx) continue;
       const apr = Number(ctx.funding) * APR_1H * 100;
-      rows.push({
+      const markPx = Number(ctx.markPx) || 0;
+      // openInterest on HL is in base units; convert with mark price.
+      const oiUsd = (Number(ctx.openInterest) || 0) * markPx;
+      rows.push(makePerpRow({
         source: "Hyperliquid",
         market: asset.name,
         quote: "USDC",
-        category: "funding-rate",
-        apr,
-        fixed: false,
-        note: fundingNote(apr, "1h"),
-      });
+        apr, period: "1h",
+        // `dayNtlVlm` is already in USD (notional volume).
+        volumeUsd: Number(ctx.dayNtlVlm) || 0,
+        openInterestUsd: oiUsd,
+      }));
     }
     return { ok: true, data: rows };
   } catch (err) {
@@ -173,52 +215,75 @@ async function fetchDefiLlama() {
     if (resp.status !== "success") throw new Error(`bad status: ${resp.status}`);
 
     // Per-project rules. Tighter TVL floors + symbol whitelist eliminate
-    // scam look-alike pools that DefiLlama lists indiscriminately.
+    // scam look-alike pools that DefiLlama lists indiscriminately. There's no
+    // longer a hardcoded APR cap — sustainability is judged from `apyBase`
+    // (real yield), `apyMean30d` (smoothed), and the `outlier` flag.
     const PROJECT_RULES = [
       // Stable lending — only canonical stables, $50M+ TVL
-      { project: "aave-v3",       minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Aave v3",      note: "instant withdraw, low risk" },
-      { project: "aave-v2",       minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Aave v2",      note: "legacy market" },
-      { project: "compound-v3",   minTvl: 30_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Compound v3",  note: "isolated markets" },
-      { project: "morpho-blue",   minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Morpho Blue",  note: "check curator before deposit" },
+      { project: "aave-v3",       minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Aave v3",      note: "мгновенный вывод, низкий риск" },
+      { project: "aave-v2",       minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Aave v2",      note: "старая версия рынка" },
+      { project: "compound-v3",   minTvl: 30_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Compound v3",  note: "изолированные рынки" },
+      { project: "morpho-blue",   minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Morpho Blue",  note: "проверь куратора перед депозитом" },
       { project: "spark",         minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Spark",        note: "DAI savings rate" },
-      { project: "sky-lending",   minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Sky sUSDS",    note: "governance-managed savings" },
-      // Fixed yield (Pendle PT/YT). No symbol whitelist — Pendle constantly
-      // launches PTs on new vault tokens (e.g. AVLT, LBTC) that aren't in any
-      // canonical list. TVL floor + APR cap below filter the junk.
-      { project: "pendle",        minTvl: 5_000_000,   symbols: null,               category: "fixed-yield",    source: "Pendle",       note: "locked to maturity" },
+      { project: "sky-lending",   minTvl: 50_000_000,  symbols: CANONICAL_STABLES, category: "stable-lending", source: "Sky sUSDS",    note: "ставка управляется DAO" },
+      // Fixed yield. No symbol whitelist — Pendle constantly launches PTs on
+      // new vault tokens that aren't in any canonical list.
+      { project: "pendle",        minTvl: 5_000_000,   symbols: null,               category: "fixed-yield",    source: "Pendle",       note: "доходность зафиксирована до даты" },
       // Delta-neutral
-      { project: "ethena-usde",   minTvl: 100_000_000, symbols: ["USDE", "SUSDE"],  category: "delta-neutral",  source: "Ethena",       note: "packaged funding arb" },
+      { project: "ethena-usde",   minTvl: 100_000_000, symbols: ["USDE", "SUSDE"],  category: "delta-neutral",  source: "Ethena",       note: "упакованный funding arb" },
       // Restaking — by underlying LST/LRT
-      { project: "eigenlayer",    minTvl: 100_000_000, symbols: CANONICAL_ETH_DERIVS, category: "restaking",   source: "EigenLayer",   note: "AVS yield + slashing risk" },
-      { project: "ether.fi-stake",minTvl: 100_000_000, symbols: ["EETH", "WEETH"],  category: "restaking",      source: "Ether.fi eETH",note: "liquid restaking" },
-      { project: "renzo",         minTvl: 50_000_000,  symbols: ["EZETH"],          category: "restaking",      source: "Renzo ezETH",  note: "liquid restaking" },
-      { project: "kelp-dao",      minTvl: 50_000_000,  symbols: ["RSETH"],          category: "restaking",      source: "Kelp rsETH",   note: "liquid restaking" },
-      { project: "puffer-finance",minTvl: 50_000_000,  symbols: ["PUFETH"],         category: "restaking",      source: "Puffer pufETH",note: "anti-slashing LRT" },
+      { project: "eigenlayer",    minTvl: 100_000_000, symbols: CANONICAL_ETH_DERIVS, category: "restaking",   source: "EigenLayer",   note: "AVS доходность + риск слэша" },
+      { project: "ether.fi-stake",minTvl: 100_000_000, symbols: ["EETH", "WEETH"],  category: "restaking",      source: "Ether.fi eETH",note: "ликвидный рестейкинг" },
+      { project: "renzo",         minTvl: 50_000_000,  symbols: ["EZETH"],          category: "restaking",      source: "Renzo ezETH",  note: "ликвидный рестейкинг" },
+      { project: "kelp-dao",      minTvl: 50_000_000,  symbols: ["RSETH"],          category: "restaking",      source: "Kelp rsETH",   note: "ликвидный рестейкинг" },
+      { project: "puffer-finance",minTvl: 50_000_000,  symbols: ["PUFETH"],         category: "restaking",      source: "Puffer pufETH",note: "LRT с защитой от слэша" },
     ];
-
-    // Hard sanity cap. Anything above this is almost certainly an emission
-    // farm on a worthless token, not a real yield. Real DeFi APYs maxed out
-    // around 60-80% on legit pools even in peak bull markets.
-    const MAX_REALISTIC_APR = 200;
 
     const rows = [];
     for (const rule of PROJECT_RULES) {
       const pools = resp.data
         .filter(p => p.project === rule.project)
         .filter(p => (p.tvlUsd ?? 0) >= rule.minTvl)
-        .filter(p => p.apy != null && p.apy > 0 && p.apy <= MAX_REALISTIC_APR)
+        .filter(p => p.apy != null && p.apy > 0)
         .filter(p => rule.symbols === null || symbolMatchesAny(p.symbol, rule.symbols));
 
       for (const p of pools) {
+        const apr = Number(p.apy) || 0;
+        const apyBase = p.apyBase == null ? null : Number(p.apyBase);
+        const apyReward = p.apyReward == null ? null : Number(p.apyReward);
+        const apyMean30d = p.apyMean30d == null ? null : Number(p.apyMean30d);
+
+        // Liquid = enough TVL + we have a base yield component (real interest
+        // or RWA yield, not just emissions) OR the 30-day mean confirms the
+        // headline APR isn't a fresh spike. The DefiLlama `outlier` flag is
+        // an explicit "trust us, this is anomalous" — always reject those.
+        const tvl = Number(p.tvlUsd) || 0;
+        const baseDominates = apyBase != null && apyBase >= apr * 0.5;
+        const smoothedAgrees = apyMean30d != null && apyMean30d >= apr * 0.6;
+        const tvlSubstantial = tvl >= rule.minTvl * 2;  // double the rule's floor
+        const liquid = !p.outlier && (baseDominates || smoothedAgrees) && tvlSubstantial;
+
+        const noteParts = [rule.note];
+        if (apyBase != null && apyReward != null && apyReward > apyBase) {
+          noteParts.push(`${apyBase.toFixed(1)}% база + ${apyReward.toFixed(1)}% эмиссии`);
+        }
+        if (apyMean30d != null && apr > apyMean30d * 1.5) {
+          noteParts.push(`выше среднего за 30 дн (${apyMean30d.toFixed(1)}%)`);
+        }
+        if (tvl > 0) {
+          noteParts.push(`TVL ${formatUsdShort(tvl)}`);
+        }
+
         rows.push({
           source: rule.source,
           market: `${p.symbol} (${shortChain(p.chain)})`,
           quote: "",
           category: rule.category,
-          apr: p.apy,
+          apr,
           fixed: rule.category === "fixed-yield",
-          note: rule.note,
-          tvl: p.tvlUsd,
+          liquid,
+          note: noteParts.join(" · "),
+          tvl,
         });
       }
     }
@@ -252,6 +317,7 @@ function loadFilters() {
       category: String(parsed.category ?? ""),
       minApr: parsed.minApr === null || parsed.minApr === undefined ? null : Number(parsed.minApr),
       maxApr: parsed.maxApr === null || parsed.maxApr === undefined ? null : Number(parsed.maxApr),
+      liquidOnly: Boolean(parsed.liquidOnly),
       sort: String(parsed.sort ?? "apr-desc"),
     };
   } catch {
@@ -266,7 +332,7 @@ const state = {
   rows: [],
   failures: [],
   lastUpdated: null,
-  filters: loadFilters() ?? { search: "", category: "", minApr: null, maxApr: null, sort: "apr-desc" },
+  filters: loadFilters() ?? { search: "", category: "", minApr: null, maxApr: null, liquidOnly: false, sort: "apr-desc" },
 };
 
 const els = {
@@ -276,6 +342,7 @@ const els = {
   sort: document.getElementById("sort-by"),
   minApr: document.getElementById("min-apr"),
   maxApr: document.getElementById("max-apr"),
+  liquidOnly: document.getElementById("liquid-only"),
   refresh: document.getElementById("refresh"),
   lastUpdated: document.getElementById("last-updated"),
   errors: document.getElementById("errors"),
@@ -305,7 +372,7 @@ function fmtApr(apr) {
 }
 
 function applyFilters(rows) {
-  const { search, category, minApr, maxApr, sort } = state.filters;
+  const { search, category, minApr, maxApr, liquidOnly, sort } = state.filters;
   let out = rows;
 
   if (search) {
@@ -324,6 +391,9 @@ function applyFilters(rows) {
   if (maxApr !== null && !Number.isNaN(maxApr)) {
     out = out.filter(r => r.apr <= maxApr);
   }
+  if (liquidOnly) {
+    out = out.filter(r => r.liquid);
+  }
 
   switch (sort) {
     case "apr-desc": out = [...out].sort((a, b) => b.apr - a.apr); break;
@@ -337,13 +407,11 @@ function applyFilters(rows) {
 function render() {
   const filtered = applyFilters(state.rows);
 
-  // Summary cards. Use only sustainable yields here — anything above ~30% APR
-  // is either an emission farm, a thin-market funding spike (e.g. equity perps
-  // like DIS/USDT, CSCO/USDT, or memecoin perps GWEI/LITE), or a points farm.
-  // None of those are honest "best yield right now" signals. They still appear
-  // in the table; the cards just don't pretend they're achievable.
-  const SUMMARY_APR_CAP = 30;
-  const sustainable = state.rows.filter(r => r.apr <= SUMMARY_APR_CAP);
+  // Summary cards. Use only rows the fetchers marked `liquid` — that's the
+  // app's signal that the APR is backed by real volume/TVL and isn't a thin-
+  // market spike. Every market is still in the table; the cards just don't
+  // claim a 300% memecoin funding rate is "best overall".
+  const sustainable = state.rows.filter(r => r.liquid);
 
   if (state.rows.length > 0) {
     if (sustainable.length > 0) {
@@ -371,23 +439,27 @@ function render() {
 
     els.sum.count.textContent = String(state.rows.length);
     const uniqueSources = new Set(state.rows.map(r => r.source));
-    els.sum.sources.textContent = `${uniqueSources.size} sources`;
+    els.sum.sources.textContent = `${uniqueSources.size} источников`;
   }
 
   // Table
   if (filtered.length === 0) {
-    els.rows.innerHTML = `<tr><td colspan="6" class="px-3 py-8 text-center text-zinc-500">No markets match your filters.</td></tr>`;
+    els.rows.innerHTML = `<tr><td colspan="6" class="px-3 py-8 text-center text-zinc-500">Под фильтры ничего не подошло.</td></tr>`;
   } else {
     const html = filtered.slice(0, 500).map(r => {
       const cat = CATEGORY_LABELS[r.category] ?? { label: r.category, badge: "" };
       const colour = aprColourClass(r.apr);
+      const rowOpacity = r.liquid === false ? "opacity-70" : "";
+      const marketBadge = r.liquid === false
+        ? `<span class="ml-1 text-[10px] text-amber-400/70" title="Тонкий рынок — APR быстро меняется">●</span>`
+        : "";
       return `
-        <tr>
+        <tr class="${rowOpacity}">
           <td class="px-3 py-2 text-zinc-300">${escapeHtml(r.source)}</td>
-          <td class="px-3 py-2 font-mono text-xs text-zinc-100">${escapeHtml(r.market)}${r.quote ? `<span class="text-zinc-500">/${escapeHtml(r.quote)}</span>` : ""}</td>
+          <td class="px-3 py-2 font-mono text-xs text-zinc-100">${escapeHtml(r.market)}${r.quote ? `<span class="text-zinc-500">/${escapeHtml(r.quote)}</span>` : ""}${marketBadge}</td>
           <td class="px-3 py-2 hidden sm:table-cell"><span class="badge ${cat.badge}">${cat.label}</span></td>
           <td class="px-3 py-2 text-right font-mono ${colour}">${fmtApr(r.apr)}</td>
-          <td class="px-3 py-2 hidden md:table-cell text-zinc-400 text-xs">${r.fixed ? "fixed" : "variable"}</td>
+          <td class="px-3 py-2 hidden md:table-cell text-zinc-400 text-xs">${r.fixed ? "фикс" : "плав"}</td>
           <td class="px-3 py-2 hidden lg:table-cell text-zinc-500 text-xs">${escapeHtml(r.note ?? "")}</td>
         </tr>
       `;
@@ -395,7 +467,7 @@ function render() {
     els.rows.innerHTML = html;
     if (filtered.length > 500) {
       els.rows.insertAdjacentHTML("beforeend",
-        `<tr><td colspan="6" class="px-3 py-3 text-center text-zinc-500 text-xs">Showing top 500 of ${filtered.length} — narrow your filter to see more.</td></tr>`);
+        `<tr><td colspan="6" class="px-3 py-3 text-center text-zinc-500 text-xs">Показано 500 из ${filtered.length} — уточните фильтр, чтобы увидеть больше.</td></tr>`);
     }
   }
 
@@ -411,7 +483,7 @@ function render() {
 
   // Updated timestamp
   if (state.lastUpdated) {
-    els.lastUpdated.textContent = `Updated ${formatRelativeTime(state.lastUpdated)}`;
+    els.lastUpdated.textContent = `Обновлено ${formatRelativeTime(state.lastUpdated)}`;
   }
 }
 
@@ -422,18 +494,18 @@ function escapeHtml(s) {
 
 function formatRelativeTime(ts) {
   const sec = Math.floor((Date.now() - ts) / 1000);
-  if (sec < 5) return "just now";
-  if (sec < 60) return `${sec}s ago`;
+  if (sec < 5) return "только что";
+  if (sec < 60) return `${sec} сек назад`;
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  return new Date(ts).toLocaleTimeString();
+  if (min < 60) return `${min} мин назад`;
+  return new Date(ts).toLocaleTimeString("ru-RU");
 }
 
 // ─── Refresh loop ─────────────────────────────────────────────────────────────
 
 async function refreshData() {
   els.refresh.disabled = true;
-  els.refresh.textContent = "↻ Loading…";
+  els.refresh.textContent = "↻ Загрузка…";
 
   const results = await Promise.all([
     fetchBinance(),
@@ -455,7 +527,7 @@ async function refreshData() {
   render();
 
   els.refresh.disabled = false;
-  els.refresh.textContent = "↻ Refresh";
+  els.refresh.textContent = "↻ Обновить";
 }
 
 // ─── Wire up listeners ────────────────────────────────────────────────────────
@@ -475,6 +547,7 @@ els.category.value = state.filters.category;
 els.sort.value = state.filters.sort;
 els.minApr.value = state.filters.minApr ?? "";
 els.maxApr.value = state.filters.maxApr ?? "";
+els.liquidOnly.checked = state.filters.liquidOnly;
 
 const onSearch = debounce(e => {
   state.filters.search = e.target.value.trim();
@@ -497,6 +570,11 @@ const onMaxApr = debounce(e => {
 els.search.addEventListener("input", onSearch);
 els.minApr.addEventListener("input", onMinApr);
 els.maxApr.addEventListener("input", onMaxApr);
+els.liquidOnly.addEventListener("change", e => {
+  state.filters.liquidOnly = e.target.checked;
+  saveFilters();
+  render();
+});
 els.category.addEventListener("change", e => {
   state.filters.category = e.target.value;
   saveFilters();
@@ -536,7 +614,7 @@ document.addEventListener("visibilitychange", () => {
 
 // Live timer for "X seconds ago"
 setInterval(() => {
-  if (state.lastUpdated) els.lastUpdated.textContent = `Updated ${formatRelativeTime(state.lastUpdated)}`;
+  if (state.lastUpdated) els.lastUpdated.textContent = `Обновлено ${formatRelativeTime(state.lastUpdated)}`;
 }, 5000);
 
 // Initial fetch + periodic refresh
