@@ -48,8 +48,8 @@ async function postJson(url, body, timeoutMs = 15000) {
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
 
 // Funding APRs above this are almost always short-lived spikes on thin
-// altcoin markets — visible but flagged so the user can spot them.
-const FUNDING_SPIKE_THRESHOLD = 100;
+// altcoin/equity perp markets — visible but flagged so the user can spot them.
+const FUNDING_SPIKE_THRESHOLD = 30;
 
 function fundingNote(apr, period) {
   const base = `${period} funding`;
@@ -337,10 +337,12 @@ function applyFilters(rows) {
 function render() {
   const filtered = applyFilters(state.rows);
 
-  // Summary cards. Use only sustainable yields here — short-lived funding
-  // spikes (>100% APR) and DeFi emission farms aren't honest representations
-  // of "what's the best yield right now". They still appear in the table.
-  const SUMMARY_APR_CAP = 100;
+  // Summary cards. Use only sustainable yields here — anything above ~30% APR
+  // is either an emission farm, a thin-market funding spike (e.g. equity perps
+  // like DIS/USDT, CSCO/USDT, or memecoin perps GWEI/LITE), or a points farm.
+  // None of those are honest "best yield right now" signals. They still appear
+  // in the table; the cards just don't pretend they're achievable.
+  const SUMMARY_APR_CAP = 30;
   const sustainable = state.rows.filter(r => r.apr <= SUMMARY_APR_CAP);
 
   if (state.rows.length > 0) {
