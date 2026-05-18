@@ -78,14 +78,21 @@ const PERP_LIQUID_OI_USD = 5_000_000;
 // perps can briefly clear $50M/day on a news spike.
 const PERP_SPIKE_BASIS_THRESHOLD = 0.003;
 
-function makePerpRow({ source, market, quote, apr, period, volumeUsd, openInterestUsd, basis }) {
+function makePerpRow({ source, market, quote, apr, period, volumeUsd, openInterestUsd, basis, nonCrypto }) {
   const hasDepth = (volumeUsd >= PERP_LIQUID_VOLUME_USD) ||
                    (openInterestUsd >= PERP_LIQUID_OI_USD);
   const inActiveSpike = basis != null && Math.abs(basis) > PERP_SPIKE_BASIS_THRESHOLD;
-  const liquid = hasDepth && !inActiveSpike;
+  // nonCrypto = equity/index perps (Binance SNDK, CRCL, QQQ, GOOGL, etc.).
+  // They have *structurally* high funding because retail can't easily hedge
+  // 24/7 against the US stock market — funding isn't going to mean-revert
+  // to 0 like a memecoin spike. But that's not a yield you can capture
+  // without exotic spot access, so we hide it from sustainable signals.
+  const liquid = hasDepth && !inActiveSpike && !nonCrypto;
 
   const noteParts = [`${period} funding`];
-  if (!hasDepth) {
+  if (nonCrypto) {
+    noteParts.push("equity/index perp — нет лёгкого хеджа на споте");
+  } else if (!hasDepth) {
     noteParts.push("тонкая ликвидность — APR быстро меняется");
   } else if (inActiveSpike) {
     const basisPct = (basis * 100).toFixed(2);
@@ -100,7 +107,7 @@ function makePerpRow({ source, market, quote, apr, period, volumeUsd, openIntere
     fixed: false,
     liquid,
     note: noteParts.join(" · "),
-    volumeUsd, openInterestUsd, basis,
+    volumeUsd, openInterestUsd, basis, nonCrypto,
   };
 }
 
@@ -112,36 +119,55 @@ function formatUsdShort(v) {
   return `$${v.toFixed(0)}`;
 }
 
-// Binance USD-M futures — funding rate + 24h volume, joined by symbol.
-// Two parallel calls so we get both data points in one render pass.
+// Binance USD-M futures — funding rate + 24h volume + contract metadata.
+// Three parallel calls: rates, tickers, and exchangeInfo (which tells us
+// which symbols are equity/index perps vs pure crypto perps — Binance
+// surfaces this via underlyingType=COIN/INDEX/STOCK and pairs like SNDK,
+// CRCL, QQQ, GOOGL that produce structurally high funding without any
+// concept of "spot" available to retail crypto users).
 async function fetchBinance() {
   try {
-    const [funding, tickers] = await Promise.all([
+    const [funding, tickers, info] = await Promise.all([
       getJson("https://fapi.binance.com/fapi/v1/premiumIndex"),
       getJson("https://fapi.binance.com/fapi/v1/ticker/24hr"),
+      getJson("https://fapi.binance.com/fapi/v1/exchangeInfo"),
     ]);
     const volumeBy = new Map();
     for (const t of tickers) {
-      // `quoteVolume` is volume measured in the quote asset (USDT/USDC),
-      // i.e. already in USD-ish terms.
       volumeBy.set(t.symbol, Number(t.quoteVolume) || 0);
     }
+    // Map symbol → { contractType, underlyingType }. Anything not PERPETUAL
+    // (delivery futures, dated contracts) is already filtered by us above; the
+    // underlyingType is the new signal — "COIN" for crypto, "INDEX"/"STOCK"
+    // (or similar) for equity-tracking perps.
+    const metaBy = new Map();
+    for (const s of (info?.symbols ?? [])) {
+      metaBy.set(s.symbol, {
+        contractType: s.contractType,
+        underlyingType: s.underlyingType,
+      });
+    }
+
     const rows = funding
-      .filter(r => !r.symbol.includes("_"))  // drop delivery futures
+      .filter(r => !r.symbol.includes("_"))
       .map(r => {
         const quote = r.symbol.endsWith("USDC") ? "USDC" : "USDT";
         const market = r.symbol.replace(new RegExp(`${quote}$`), "");
         const apr = Number(r.lastFundingRate) * APR_8H * 100;
-        // premiumIndex includes markPrice and indexPrice on every row.
         const markPrice = Number(r.markPrice) || 0;
         const indexPrice = Number(r.indexPrice) || 0;
         const basis = indexPrice > 0 ? (markPrice - indexPrice) / indexPrice : null;
+        const meta = metaBy.get(r.symbol) ?? {};
+        // "COIN" = pure crypto. Anything else (INDEX, STOCK, undefined) we
+        // treat as non-canonical and refuse to surface as a sustainable yield.
+        const nonCrypto = meta.underlyingType != null && meta.underlyingType !== "COIN";
         return makePerpRow({
           source: "Binance",
           market, quote, apr, period: "8h",
           volumeUsd: volumeBy.get(r.symbol) ?? 0,
           openInterestUsd: 0,
           basis,
+          nonCrypto,
         });
       });
     return { ok: true, data: rows };
