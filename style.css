@@ -282,9 +282,11 @@ tbody tr.data-row.expanded {
 
 .sparkline-tooltip {
   position: absolute;
-  top: -2px;
-  transform: translateY(-100%);
-  background: #1a1a24;
+  /* Live INSIDE the sparkline area, not above it — keeps the tooltip safe
+     from parent overflow clipping no matter how the chart card is sized. */
+  top: 4px;
+  background: rgba(26, 26, 36, 0.95);
+  backdrop-filter: blur(4px);
   border: 1px solid #7c5cff;
   border-radius: 4px;
   padding: 4px 8px;
@@ -296,7 +298,7 @@ tbody tr.data-row.expanded {
   gap: 6px;
   align-items: center;
   z-index: 10;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
 }
 .sparkline-tooltip .tt-date {
   color: #8a92a6;
