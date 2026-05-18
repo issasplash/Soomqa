@@ -498,6 +498,221 @@ function applyFilters(rows) {
   return out;
 }
 
+// ─── Recommendation engine ────────────────────────────────────────────────────
+//
+// Given a row, its history stats, the user's amount, and the projection table,
+// produce a "should I enter right now?" verdict with reasons. The engine is
+// rule-based (no ML, no opacity) — every reason is auditable, and the rules
+// differ by category so funding rates don't get judged like stable lending.
+
+const VERDICTS = {
+  go:   { label: "Стоит зайти",       emoji: "🟢", cls: "verdict-go" },
+  wait: { label: "Лучше подождать",   emoji: "🟡", cls: "verdict-wait" },
+  skip: { label: "Не стоит",          emoji: "🔴", cls: "verdict-skip" },
+};
+
+function makeRecommendation(row, stats, amount, breakDays) {
+  const reasons = [];
+  const pros = [];
+  const cons = [];
+  let score = 0;
+
+  const fees = feesForCategory(row.category, amount);
+  const oneMonthNet = projectAt(row, amount, 30).net;
+
+  // ─── Universal red flags ────────────────────────────────────────────────────
+  if (row.liquid === false) {
+    cons.push("Тонкий рынок — APR может быстро откатиться");
+    score -= 40;
+  }
+  if (row.apr < 0) {
+    cons.push("APR отрицательный — ты будешь платить, не получать");
+    score -= 80;
+  }
+  if (row.nonCrypto) {
+    cons.push("Equity/index perp — без лёгкого хеджа на споте funding не поймать");
+    score -= 50;
+  }
+  if (oneMonthNet < 0) {
+    cons.push(`На $${amount.toFixed(0)} за месяц убыток после fees (${oneMonthNet.toFixed(2)}$)`);
+    score -= 30;
+  }
+  if (breakDays != null && breakDays > 30) {
+    cons.push(`Break-even ${formatDuration(breakDays, row)} — слишком долго для текущей суммы`);
+    score -= 20;
+  } else if (breakDays != null && breakDays > 0 && breakDays < 1) {
+    pros.push(`Окупаемость менее суток (${formatDuration(breakDays, row)})`);
+    score += 10;
+  }
+
+  // ─── Category-specific reasoning ────────────────────────────────────────────
+  if (row.category === "funding-rate") {
+    judgeFundingRate(row, stats, pros, cons, score => score, n => score += n);
+    // Use mutator-via-closure to keep score in one place. JS doesn't have
+    // by-reference primitives, so we re-thread the value below.
+    score += fundingRateScore(row, stats, pros, cons);
+  } else if (row.category === "stable-lending") {
+    score += stableLendingScore(row, stats, pros, cons);
+  } else if (row.category === "fixed-yield") {
+    score += fixedYieldScore(row, stats, pros, cons, amount);
+  } else if (row.category === "delta-neutral") {
+    score += deltaNeutralScore(row, stats, pros, cons);
+  } else if (row.category === "restaking") {
+    score += restakingScore(row, stats, pros, cons);
+  }
+
+  // ─── Compare against safest baseline ────────────────────────────────────────
+  const baseline = findBaselineComparison(row);
+  if (baseline) {
+    const baseNet = projectAt(baseline, amount, 30).net;
+    const diff = oneMonthNet - baseNet;
+    if (diff > Math.abs(baseNet) * 0.5 && diff > 1) {
+      pros.push(`За месяц приносит на $${diff.toFixed(2)} больше чем безопасный ${baseline.source} (${baseline.apr.toFixed(2)}%)`);
+      score += 10;
+    } else if (diff < -1 && row.category !== "stable-lending") {
+      cons.push(`Безопасный ${baseline.source} приносит больше на $${Math.abs(diff).toFixed(2)}/мес`);
+      score -= 15;
+    }
+  }
+
+  // ─── Final verdict ──────────────────────────────────────────────────────────
+  let verdict;
+  if (score >= 30)       verdict = "go";
+  else if (score >= -10) verdict = "wait";
+  else                   verdict = "skip";
+
+  // Override: anything with critical cons goes straight to skip
+  if (oneMonthNet < 0 || row.apr < 0 || row.nonCrypto) verdict = "skip";
+
+  return { verdict, score, pros, cons };
+}
+
+// Funding-rate specific score adjustments. Mutates pros/cons.
+function fundingRateScore(row, stats, pros, cons) {
+  let delta = 0;
+  if (!stats) {
+    cons.push("Истории недостаточно — нельзя оценить устойчивость ставки");
+    return -5;
+  }
+  const ratio = stats.avg !== 0 ? row.apr / stats.avg : 1;
+  const range = stats.max - stats.min;
+  const cv = stats.avg !== 0 ? range / Math.abs(stats.avg) : 0;  // coefficient-of-variation proxy
+
+  if (Math.abs(ratio) > 2 && row.apr > 0) {
+    cons.push(`Текущая APR в ${ratio.toFixed(1)}× выше среднего — спайк, мгновенно может откатиться к ${stats.avg.toFixed(1)}%`);
+    delta -= 20;
+  } else if (Math.abs(ratio) > 1.5 && row.apr > 0) {
+    cons.push(`Ставка выше среднего в ${ratio.toFixed(1)}× — может откатиться`);
+    delta -= 10;
+  } else if (Math.abs(ratio) > 0.8 && Math.abs(ratio) < 1.3 && stats.avg > 10) {
+    pros.push(`Ставка близка к среднему (${stats.avg.toFixed(1)}%) — sustainable значение`);
+    delta += 15;
+  } else if (stats.avg < 0 || (stats.avg < 5 && row.apr < 10)) {
+    cons.push(`Средняя ставка за период всего ${stats.avg.toFixed(1)}% — низкий yield`);
+    delta -= 15;
+  }
+
+  if (cv > 5 && stats.count > 5) {
+    cons.push(`Высокая волатильность ставки (разброс ${stats.min.toFixed(1)}…${stats.max.toFixed(1)}%) — непредсказуемо`);
+    delta -= 10;
+  } else if (cv < 1 && stats.count > 5 && stats.avg > 8) {
+    pros.push("Низкая волатильность — ставка ведёт себя стабильно");
+    delta += 10;
+  }
+
+  if (stats.min < -5) {
+    cons.push(`Ставка уходила в минус (${stats.min.toFixed(1)}%) — может повториться`);
+    delta -= 5;
+  }
+
+  return delta;
+}
+
+function stableLendingScore(row, stats, pros, cons) {
+  let delta = 0;
+  if (row.apr >= 6) { pros.push(`Хорошая ставка для стейбла (${row.apr.toFixed(2)}%)`); delta += 15; }
+  else if (row.apr >= 4) { pros.push(`Средняя по рынку ставка для стейбла`); delta += 5; }
+  else { cons.push(`Низкая ставка для стейбла (${row.apr.toFixed(2)}%) — у других выше`); delta -= 10; }
+
+  if (row.tvl && row.tvl > 500_000_000) { pros.push(`TVL ${formatUsdShort(row.tvl)} — глубокая ликвидность, мгновенный вывод`); delta += 10; }
+  else if (row.tvl && row.tvl < 50_000_000) { cons.push(`TVL ${formatUsdShort(row.tvl)} — низкая глубина`); delta -= 10; }
+
+  if (stats) {
+    if (row.apr > stats.avg * 1.3) { pros.push(`Сейчас выше исторического (среднее ${stats.avg.toFixed(2)}%) — момент удачный`); delta += 10; }
+    else if (row.apr < stats.avg * 0.7) { cons.push(`Ниже исторического — лучше подождать`); delta -= 5; }
+  }
+
+  return delta;
+}
+
+function fixedYieldScore(row, stats, pros, cons, amount) {
+  let delta = 10;  // baseline: fixed yields are inherently safer than variable
+  // Compare to top stable lending — fixed should be at least 3% premium over
+  // floating rate to justify lock-up.
+  const stableBaseline = state.rows
+    .filter(r => r.liquid && r.category === "stable-lending")
+    .reduce((a, b) => !a || b.apr > a.apr ? b : a, null);
+  if (stableBaseline) {
+    const premium = row.apr - stableBaseline.apr;
+    if (premium >= 5) { pros.push(`Премия ${premium.toFixed(1)}% над лендингом ${stableBaseline.source} — лочить выгодно`); delta += 15; }
+    else if (premium >= 2) { pros.push(`Небольшая премия (${premium.toFixed(1)}%) над лендингом`); delta += 5; }
+    else if (premium < 0) { cons.push(`APR ниже лендинга ${stableBaseline.source} — нет смысла лочить`); delta -= 30; }
+    else { cons.push(`Премия над лендингом мала (${premium.toFixed(1)}%) — не оправдывает локап`); delta -= 5; }
+  }
+  if (row.tvl && row.tvl < 10_000_000) {
+    cons.push(`TVL ${formatUsdShort(row.tvl)} — низкая ликвидность PT, exit до maturity может быть дорогим`);
+    delta -= 10;
+  } else if (row.tvl && row.tvl > 100_000_000) {
+    pros.push(`TVL ${formatUsdShort(row.tvl)} — глубокий рынок PT`);
+    delta += 5;
+  }
+  return delta;
+}
+
+function deltaNeutralScore(row, stats, pros, cons) {
+  let delta = 0;
+  if (row.apr >= 12) { pros.push(`Хорошая ставка для упакованного funding arb (${row.apr.toFixed(2)}%)`); delta += 15; }
+  else if (row.apr >= 6) { pros.push(`Приемлемая ставка для дельта-нейтрала`); delta += 5; }
+  else { cons.push(`Низкая ставка (${row.apr.toFixed(2)}%) — funding-rates на рынке сжаты`); delta -= 15; }
+
+  if (stats && row.apr < stats.avg * 0.6) {
+    cons.push(`Сейчас ниже исторического — funding на рынке остывает`);
+    delta -= 10;
+  }
+  return delta;
+}
+
+function restakingScore(row, stats, pros, cons) {
+  let delta = 0;
+  if (row.apr >= 4) { pros.push(`Доходность ETH-уровня (${row.apr.toFixed(2)}%) + airdrop-points бонусом`); delta += 10; }
+  else { cons.push(`Низкая доходность даже для рестейкинга`); delta -= 10; }
+  return delta;
+}
+
+// Stub kept for parallel structure — real logic lives in *Score helpers above.
+function judgeFundingRate() {}
+
+function renderRecommendation(row, stats, amount, breakDays) {
+  if (amount <= 0) return "";
+  const rec = makeRecommendation(row, stats, amount, breakDays);
+  const v = VERDICTS[rec.verdict];
+
+  const prosHtml = rec.pros.length > 0
+    ? `<ul class="rec-list rec-pros">${rec.pros.map(p => `<li>✓ ${escapeHtml(p)}</li>`).join("")}</ul>`
+    : "";
+  const consHtml = rec.cons.length > 0
+    ? `<ul class="rec-list rec-cons">${rec.cons.map(c => `<li>✗ ${escapeHtml(c)}</li>`).join("")}</ul>`
+    : "";
+
+  return `
+    <div class="recommendation ${v.cls}">
+      <div class="rec-headline">${v.emoji} <b>${v.label}</b> <span class="rec-score">${rec.score >= 0 ? "+" : ""}${rec.score}</span></div>
+      ${prosHtml}
+      ${consHtml}
+    </div>
+  `;
+}
+
 // ─── Historical APR / yield (loaded on demand when a row is expanded) ────────
 //
 // Each source has its own history endpoint and returns its own time series
@@ -737,6 +952,9 @@ function repaintHistorySection(row) {
   const newSection = wrapper.firstElementChild;
   section.replaceWith(newSection);
   wireHistoryChipListeners(newSection, row);
+  // Recommendation depends on history stats — re-paint it whenever the
+  // history section changes (new data arrived, or user switched period).
+  repaintRecommendation(row);
 }
 
 function wireHistoryChipListeners(section, row) {
@@ -930,9 +1148,32 @@ function renderCalculator(row) {
       ${verdict}
       ${baselineBlock}
       ${renderHistorySection(row)}
+      <div class="recommendation-slot" data-rec-for="${row._idx}">
+        ${renderRecommendationFromCache(row, amount, breakDays)}
+      </div>
       <div class="calc-formula">${variableNote}</div>
     </div>
   `;
+}
+
+// Recommendation slot uses cached history stats if available. If not, it
+// shows a "loading" placeholder; once history loads, repaintHistorySection
+// also re-paints the recommendation slot via repaintRecommendation().
+function renderRecommendationFromCache(row, amount, breakDays) {
+  const period = selectedPeriodFor(row);
+  const cached = historyCache.get(historyCacheKey(row, period));
+  const stats = cached ? statsFromPoints(cached.points) : null;
+  return renderRecommendation(row, stats, amount, breakDays);
+}
+
+function repaintRecommendation(row) {
+  if (!row || row._idx == null) return;
+  const slot = document.querySelector(`.recommendation-slot[data-rec-for="${row._idx}"]`);
+  if (!slot) return;
+  const cstate = ensureCalcState(row);
+  const amount = Math.max(0, Number(cstate.amount) || 0);
+  const breakDays = breakEvenDays(row, amount);
+  slot.innerHTML = renderRecommendationFromCache(row, amount, breakDays);
 }
 
 // Find the safest liquid alternative for opportunity-cost framing. Prefer top
@@ -1056,6 +1297,13 @@ function attachCalcInputListener(input) {
       try { restored.setSelectionRange(input.selectionStart, input.selectionEnd); } catch {}
     }
     newPanel.querySelectorAll("input[data-calc-input]").forEach(attachCalcInputListener);
+    // Re-wire the history chip listeners on the new panel and kick off the
+    // (cached) history load — recommendation block depends on it.
+    const newHistorySection = newPanel.querySelector(".history-section");
+    if (newHistorySection) {
+      wireHistoryChipListeners(newHistorySection, row);
+      ensureHistoryLoaded(row);
+    }
   });
   input.addEventListener("click", e => e.stopPropagation());
 }
