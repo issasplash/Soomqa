@@ -21,6 +21,7 @@ const CATEGORY_LABELS = {
   "delta-neutral": { label: "Δ-нейтрал", badge: "badge-delta" },
   "restaking":     { label: "Рестейк",   badge: "badge-restake" },
   "leveraged-stable": { label: "Лев. стейбл", badge: "badge-leveraged" },
+  "cross-exchange-spread": { label: "Cross-spread", badge: "badge-spread" },
 };
 
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
@@ -698,6 +699,8 @@ const els = {
     fixedSrc: document.getElementById("sum-fixed-src"),
     stableApr: document.getElementById("sum-stable-apr"),
     stableSrc: document.getElementById("sum-stable-src"),
+    spreadApr: document.getElementById("sum-spread-apr"),
+    spreadSrc: document.getElementById("sum-spread-src"),
     count: document.getElementById("sum-count"),
     sources: document.getElementById("sum-sources"),
   },
@@ -812,6 +815,8 @@ function makeRecommendation(row, stats, amount, breakDays) {
     score += deltaNeutralScore(row, stats, pros, cons);
   } else if (row.category === "restaking") {
     score += restakingScore(row, stats, pros, cons);
+  } else if (row.category === "cross-exchange-spread") {
+    score += spreadScore(row, pros, cons);
   }
 
   // ─── Compare against safest baseline ────────────────────────────────────────
@@ -932,6 +937,34 @@ function deltaNeutralScore(row, stats, pros, cons) {
     cons.push(`Сейчас ниже исторического — funding на рынке остывает`);
     delta -= 10;
   }
+  return delta;
+}
+
+function spreadScore(row, pros, cons) {
+  let delta = 0;
+  if (row.apr >= 20) {
+    pros.push(`Хороший спред ${row.apr.toFixed(1)}% APR — окупит fees двух бирж быстро`);
+    delta += 20;
+  } else if (row.apr >= 10) {
+    pros.push(`Умеренный спред ${row.apr.toFixed(1)}% — окупится за неделю-две`);
+    delta += 5;
+  } else {
+    cons.push(`Маленький спред (${row.apr.toFixed(1)}%) — fees 0.4% съедят большую часть`);
+    delta -= 10;
+  }
+  if (row.longLeg && row.shortLeg) {
+    if (row.longLeg.apr < 0) {
+      pros.push(`На long-ноге (${row.longLeg.source}) ты получаешь funding ${row.longLeg.apr.toFixed(2)}% — двойной плюс`);
+      delta += 10;
+    }
+    if (row.shortLeg.apr < 10) {
+      cons.push(`Short-нога низкая — funding-rate может откатиться, спред сожмётся`);
+      delta -= 5;
+    }
+  }
+  // Cross-exchange = double capital lock-up (need margin on both venues).
+  // Worth flagging so the user remembers it.
+  cons.push(`Нужен капитал на 2 биржах одновременно (один комитит обе ноги)`);
   return delta;
 }
 
@@ -1357,6 +1390,11 @@ function feesForCategory(category, amount) {
     case "fixed-yield":    return amount * 0.001;   // Pendle PT entry/exit
     case "stable-lending": return 0;                // gas only; ≈ 0
     case "restaking":      return 0;
+    case "cross-exchange-spread":
+      // 4 taker trades across 2 exchanges (open long, open short, close
+      // long, close short) ≈ 0.40% round-trip. Slightly higher than a
+      // single-venue funding play because both legs pay independently.
+      return amount * 0.004;
     default:               return 0;
   }
 }
@@ -1382,6 +1420,17 @@ function horizonsFor(row) {
       { label: "1 месяц",  days: 30 },
       { label: "3 месяца", days: 90 },
       { label: "До maturity (≈6 мес)", days: 180 },
+      { label: "1 год",    days: 365 },
+    ];
+  }
+  if (row.category === "cross-exchange-spread") {
+    // Delta-neutral spreads are usually held days-to-weeks until funding
+    // converges. Show a wide horizon spread to make break-even visible.
+    return [
+      { label: "1 день",   days: 1 },
+      { label: "3 дня",    days: 3 },
+      { label: "1 неделя", days: 7 },
+      { label: "1 месяц",  days: 30 },
       { label: "1 год",    days: 365 },
     ];
   }
@@ -1742,6 +1791,14 @@ function render() {
       els.sum.stableSrc.textContent = `${bestStable.source} · ${bestStable.market}`;
     }
 
+    const spreads = sustainable.filter(r => r.category === "cross-exchange-spread");
+    if (spreads.length > 0) {
+      const bestSpread = spreads.reduce((a, b) => b.apr > a.apr ? b : a);
+      els.sum.spreadApr.textContent = fmtApr(bestSpread.apr);
+      els.sum.spreadApr.className = `text-xl font-semibold mt-1 font-mono ${aprColourClass(bestSpread.apr)}`;
+      els.sum.spreadSrc.textContent = `${bestSpread.market} (${bestSpread.longLeg?.source ?? "?"}→${bestSpread.shortLeg?.source ?? "?"})`;
+    }
+
     els.sum.count.textContent = String(state.rows.length);
     const uniqueSources = new Set(state.rows.map(r => r.source));
     els.sum.sources.textContent = `${uniqueSources.size} источников`;
@@ -1824,6 +1881,63 @@ function formatRelativeTime(ts) {
 
 // ─── Refresh loop ─────────────────────────────────────────────────────────────
 
+// ─── Cross-exchange funding-rate spread analyser ─────────────────────────────
+//
+// Build synthetic rows that pair the best long-leg exchange (lowest/most
+// negative funding) with the best short-leg exchange (highest positive
+// funding) for each crypto-perp symbol. The synthetic APR is the spread —
+// the rate you'd capture as a delta-neutral position holding both legs.
+//
+// Liquidity is propagated: a spread is `liquid` only when BOTH legs are
+// liquid. Equity/index perps (nonCrypto) are excluded — there's no spot
+// venue to settle against.
+
+const SPREAD_MIN_APR_TO_SURFACE = 3;  // hide micro-spreads — pure noise
+
+function computeCrossExchangeSpreads(rows) {
+  const fundingRows = rows.filter(r =>
+    r.category === "funding-rate" && !r.nonCrypto,
+  );
+  const bySymbol = new Map();
+  for (const r of fundingRows) {
+    if (!r.market) continue;
+    if (!bySymbol.has(r.market)) bySymbol.set(r.market, []);
+    bySymbol.get(r.market).push(r);
+  }
+
+  const spreads = [];
+  for (const [market, group] of bySymbol) {
+    if (group.length < 2) continue;
+    // Prefer liquid candidates. Fall back to the whole group if fewer than two
+    // legs are liquid — the row will then be marked non-liquid itself.
+    const liquidGroup = group.filter(r => r.liquid);
+    const candidates = liquidGroup.length >= 2 ? liquidGroup : group;
+
+    let longLeg = candidates[0], shortLeg = candidates[0];
+    for (const r of candidates) {
+      if (r.apr < longLeg.apr) longLeg = r;
+      if (r.apr > shortLeg.apr) shortLeg = r;
+    }
+    if (longLeg === shortLeg) continue;
+    const spread = shortLeg.apr - longLeg.apr;
+    if (spread < SPREAD_MIN_APR_TO_SURFACE) continue;
+
+    spreads.push({
+      source: "Cross-exchange",
+      market,
+      quote: "",
+      category: "cross-exchange-spread",
+      apr: spread,
+      fixed: false,
+      liquid: !!longLeg.liquid && !!shortLeg.liquid,
+      note: `long ${longLeg.source} (${longLeg.apr.toFixed(2)}%) + short ${shortLeg.source} (${shortLeg.apr.toFixed(2)}%)`,
+      longLeg,
+      shortLeg,
+    });
+  }
+  return spreads;
+}
+
 async function refreshData() {
   els.refresh.disabled = true;
   els.refresh.textContent = "↻ Загрузка…";
@@ -1852,6 +1966,9 @@ async function refreshData() {
     if (r.ok) rows.push(...r.data);
     else failures.push({ source: r.source, error: r.error });
   }
+  // Derive cross-exchange spreads from funding-rate rows and append them as
+  // synthetic rows in their own category.
+  rows.push(...computeCrossExchangeSpreads(rows));
 
   state.rows = rows;
   state.failures = failures;

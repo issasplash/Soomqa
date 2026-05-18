@@ -45,6 +45,12 @@ const ALERT_RULES = [
     match: r => r.category === "delta-neutral" && r.liquid && r.apr >= 15,
     cooldownHours: 6,
   },
+  {
+    id: "cross-exchange-spread",
+    label: "Cross-exchange спред",
+    match: r => r.category === "cross-exchange-spread" && r.liquid && r.apr >= 20,
+    cooldownHours: 4,
+  },
 ];
 
 // ─── Shared constants (mirrors app.js — keep in sync) ─────────────────────────
@@ -182,6 +188,100 @@ async function fetchHyperliquid() {
   } catch (err) { return { ok: false, source: "Hyperliquid", error: err.message }; }
 }
 
+async function fetchMexcFunding() {
+  try {
+    const [fundings, tickers] = await Promise.all([
+      getJson("https://contract.mexc.com/api/v1/contract/funding_rate/all"),
+      getJson("https://contract.mexc.com/api/v1/contract/ticker"),
+    ]);
+    const volumeBy = new Map();
+    for (const t of (tickers?.data ?? [])) volumeBy.set(t.symbol, Number(t.amount24) || 0);
+    const rows = (fundings?.data ?? []).map(r => {
+      const apr = Number(r.fundingRate ?? 0) * APR_8H * 100;
+      const market = r.symbol.replace(/_USDT$/, "");
+      return makePerpRow({
+        source: "MEXC", market, quote: "USDT", apr, period: "8h",
+        volumeUsd: volumeBy.get(r.symbol) ?? 0, openInterestUsd: 0, basis: null,
+      });
+    });
+    return { ok: true, data: rows };
+  } catch (err) { return { ok: false, source: "MEXC", error: err.message }; }
+}
+
+async function fetchGateFunding() {
+  try {
+    const data = await getJson("https://api.gateio.ws/api/v4/futures/usdt/contracts");
+    const rows = (Array.isArray(data) ? data : []).map(r => {
+      const intervalSec = Number(r.funding_interval) || 28800;
+      const periodsPerYear = (365 * 24 * 3600) / intervalSec;
+      const apr = Number(r.funding_rate ?? 0) * periodsPerYear * 100;
+      const market = r.name.replace(/_USDT$/, "");
+      const markPrice = Number(r.mark_price ?? 0);
+      const indexPrice = Number(r.index_price ?? 0);
+      const basis = indexPrice > 0 ? (markPrice - indexPrice) / indexPrice : null;
+      return makePerpRow({
+        source: "Gate.io", market, quote: "USDT", apr,
+        period: intervalSec === 3600 ? "1h" : "8h",
+        volumeUsd: Number(r.trade_size_24h_usd ?? 0), openInterestUsd: 0, basis,
+      });
+    });
+    return { ok: true, data: rows };
+  } catch (err) { return { ok: false, source: "Gate.io", error: err.message }; }
+}
+
+async function fetchHtxFunding() {
+  try {
+    const data = await getJson("https://api.hbdm.com/linear-swap-api/v1/swap_batch_funding_rate");
+    const rows = (data?.data ?? []).map(r => {
+      const apr = Number(r.funding_rate ?? 0) * APR_8H * 100;
+      const market = r.contract_code.replace(/-USDT$/, "");
+      return makePerpRow({
+        source: "HTX", market, quote: "USDT", apr, period: "8h",
+        volumeUsd: 0, openInterestUsd: 0, basis: null,
+      });
+    });
+    return { ok: true, data: rows };
+  } catch (err) { return { ok: false, source: "HTX", error: err.message }; }
+}
+
+// Synthesise cross-exchange spread rows from per-venue funding rates.
+// Same logic as the browser's computeCrossExchangeSpreads — keep them in sync.
+function computeCrossExchangeSpreads(rows) {
+  const fundingRows = rows.filter(r =>
+    r.category === "funding-rate" && !r.nonCrypto && r.market,
+  );
+  const bySymbol = new Map();
+  for (const r of fundingRows) {
+    if (!bySymbol.has(r.market)) bySymbol.set(r.market, []);
+    bySymbol.get(r.market).push(r);
+  }
+  const SPREAD_MIN = 3;
+  const out = [];
+  for (const [market, group] of bySymbol) {
+    if (group.length < 2) continue;
+    const liquidGroup = group.filter(r => r.liquid);
+    const candidates = liquidGroup.length >= 2 ? liquidGroup : group;
+    let longLeg = candidates[0], shortLeg = candidates[0];
+    for (const r of candidates) {
+      if (r.apr < longLeg.apr) longLeg = r;
+      if (r.apr > shortLeg.apr) shortLeg = r;
+    }
+    if (longLeg === shortLeg) continue;
+    const spread = shortLeg.apr - longLeg.apr;
+    if (spread < SPREAD_MIN) continue;
+    out.push({
+      source: "Cross-exchange",
+      market,
+      category: "cross-exchange-spread",
+      apr: spread,
+      fixed: false,
+      liquid: !!longLeg.liquid && !!shortLeg.liquid,
+      longLeg, shortLeg,
+    });
+  }
+  return out;
+}
+
 async function fetchDefiLlama() {
   try {
     const resp = await getJson("https://yields.llama.fi/pools");
@@ -279,6 +379,10 @@ function formatAlertBlock(rule, rows) {
   const head = `<b>${escapeHtml(rule.label)}</b>`;
   const lines = rows.slice(0, 8).map(r => {
     const apr = r.apr.toFixed(2);
+    // Spread rows have their own format — show both legs.
+    if (r.category === "cross-exchange-spread" && r.longLeg && r.shortLeg) {
+      return `  • <code>${escapeHtml(r.market)}</code> — <b>${apr}%</b> · long ${escapeHtml(r.longLeg.source)} (${r.longLeg.apr.toFixed(2)}%) + short ${escapeHtml(r.shortLeg.source)} (${r.shortLeg.apr.toFixed(2)}%)`;
+    }
     const where = r.chain ? `${r.source} · ${r.market} (${r.chain})` : `${r.source} · ${r.market}${r.quote ? "/" + r.quote : ""}`;
     let extra = "";
     if (r.category === "funding-rate" && r.volumeUsd) extra = ` · об. ${formatUsdShort(r.volumeUsd)}`;
@@ -292,7 +396,9 @@ function formatAlertBlock(rule, rows) {
 
 async function fetchAll() {
   const results = await Promise.all([
-    fetchBinance(), fetchBybit(), fetchHyperliquid(), fetchDefiLlama(),
+    fetchBinance(), fetchBybit(), fetchHyperliquid(),
+    fetchMexcFunding(), fetchGateFunding(), fetchHtxFunding(),
+    fetchDefiLlama(),
   ]);
   const rows = [];
   const failures = [];
@@ -300,6 +406,8 @@ async function fetchAll() {
     if (r.ok) rows.push(...r.data);
     else failures.push(r);
   }
+  // Append synthetic cross-exchange spread rows so the alert rule can fire.
+  rows.push(...computeCrossExchangeSpreads(rows));
   return { rows, failures };
 }
 

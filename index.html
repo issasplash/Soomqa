@@ -57,7 +57,7 @@
     </section>
 
     <!-- Summary cards -->
-    <section id="summary" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+    <section id="summary" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
       <div class="bg-bg-card border border-border rounded-lg p-3">
         <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Лучший в целом</div>
         <div id="sum-best-apr" class="text-xl font-semibold mt-1 font-mono">—</div>
@@ -72,6 +72,11 @@
         <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Лучший лендинг стейблов</div>
         <div id="sum-stable-apr" class="text-xl font-semibold mt-1 font-mono">—</div>
         <div id="sum-stable-src" class="text-xs text-zinc-400 mt-0.5 truncate">—</div>
+      </div>
+      <div class="bg-bg-card border border-border rounded-lg p-3">
+        <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Лучший cross-spread</div>
+        <div id="sum-spread-apr" class="text-xl font-semibold mt-1 font-mono">—</div>
+        <div id="sum-spread-src" class="text-xs text-zinc-400 mt-0.5 truncate">—</div>
       </div>
       <div class="bg-bg-card border border-border rounded-lg p-3">
         <div class="text-zinc-500 text-[11px] uppercase tracking-wide">Всего рынков</div>
@@ -96,6 +101,7 @@
           <select id="category-filter" class="bg-bg-elev border border-border rounded-md px-2 py-2 text-sm">
             <option value="">Все категории</option>
             <option value="funding-rate">Funding ставка</option>
+            <option value="cross-exchange-spread">Cross-exchange спред</option>
             <option value="fixed-yield">Фикс. доходность</option>
             <option value="stable-lending">Лендинг стейблов</option>
             <option value="delta-neutral">Δ-нейтрал</option>
