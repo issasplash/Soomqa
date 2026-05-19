@@ -1136,10 +1136,10 @@ function renderRecommendation(row, stats, amount, breakDays) {
   const v = VERDICTS[rec.verdict];
 
   const prosHtml = rec.pros.length > 0
-    ? `<ul class="rec-list rec-pros">${rec.pros.map(p => `<li>✓ ${escapeHtml(p)}</li>`).join("")}</ul>`
+    ? `<ul class="rec-list rec-pros">${rec.pros.map(p => `<li>✓ ${linkGlossaryTerms(escapeHtml(p))}</li>`).join("")}</ul>`
     : "";
   const consHtml = rec.cons.length > 0
-    ? `<ul class="rec-list rec-cons">${rec.cons.map(c => `<li>✗ ${escapeHtml(c)}</li>`).join("")}</ul>`
+    ? `<ul class="rec-list rec-cons">${rec.cons.map(c => `<li>✗ ${linkGlossaryTerms(escapeHtml(c))}</li>`).join("")}</ul>`
     : "";
 
   return `
@@ -2108,7 +2108,7 @@ function renderRow(r, i) {
       <td class="px-3 py-2 hidden sm:table-cell"><span class="badge ${cat.badge}">${cat.label}</span></td>
       <td class="px-3 py-2 text-right font-mono ${colour}"><span class="apr-cell">${riskDot}${arrow}${fmtApr(r.apr)}</span></td>
       <td class="px-3 py-2 hidden md:table-cell text-zinc-400 text-xs">${r.fixed ? "фикс" : "плав"}</td>
-      <td class="px-3 py-2 hidden lg:table-cell text-zinc-500 text-xs">${escapeHtml(r.note ?? "")}</td>
+      <td class="px-3 py-2 hidden lg:table-cell text-zinc-500 text-xs">${linkGlossaryTerms(escapeHtml(r.note ?? ""))}</td>
     </tr>
     ${expanded ? `<tr class="calc-row"><td colspan="6">${renderCalculator(r)}</td></tr>` : ""}
   `;
@@ -2556,6 +2556,152 @@ function applyPreset(name) {
 
 document.querySelectorAll(".preset-btn[data-preset]").forEach(btn => {
   btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
+});
+
+// ─── Glossary — clickable definitions for jargon ─────────────────────────────
+//
+// Keys must be lowercase. Match is whole-word case-insensitive against the
+// rendered text in notes / recommendations / hedge breakdowns. We wrap the
+// first occurrence per text block to avoid visual noise.
+
+const GLOSSARY = {
+  "funding rate": {
+    title: "Funding rate",
+    body: `<p>Платёж между лонгами и шортами на perpetual-фьючерсе, который удерживает цену перпа близкой к споту.</p>
+<p>Если перп дороже спота — long'и платят short'ам. Если дешевле — наоборот. На Bybit/MEXC/Gate/HTX платится каждые <b>8 часов</b>, на Hyperliquid — <b>каждый час</b>.</p>
+<p>Годовая ставка (APR) = funding rate × количество циклов в году.</p>`,
+  },
+  "funding": {
+    title: "Funding rate",
+    body: `<p>То же что funding rate — платёж между long и short позициями на perpetual фьючерсе.</p>`,
+  },
+  "basis": {
+    title: "Basis",
+    body: `<p>Разница между mark price (цена перпа) и index price (цена спота): <code>(mark − index) / index</code>.</p>
+<p>Если basis &gt; 0 — перп торгуется выше спота, funding положительный, скоро откатится. Если basis ≈ 0 — рынок в равновесии, funding устойчивый.</p>
+<p>В Soomqa если |basis| &gt; 0.3% — строка помечается как non-liquid (спайк, не sustainable).</p>`,
+  },
+  "tvl": {
+    title: "TVL — Total Value Locked",
+    body: `<p>Сумма всех депозитов в DeFi-протоколе. Грубая метрика «глубины» рынка.</p>
+<p>В Soomqa: для лендинг-протокола TVL ≥ $50M = пул достаточно глубокий чтобы зайти/выйти без серьёзного slippage. TVL ≥ $500M = top-tier безопасность.</p>`,
+  },
+  "apr": {
+    title: "APR vs APY",
+    body: `<p><b>APR (Annual Percentage Rate)</b> — простая годовая ставка без учёта compound.</p>
+<p><b>APY (Annual Percentage Yield)</b> — годовая ставка с учётом ежедневного compound. Обычно чуть выше APR.</p>
+<p>Soomqa показывает APR — это честный «голый» yield. APY с compound обычно +0.1-2% выше для стейблов на длинном горизонте.</p>`,
+  },
+  "apy": {
+    title: "APR vs APY",
+    body: `<p><b>APR</b> — простая годовая ставка. <b>APY</b> — с учётом compound. Для стейблов разница ~0.1-2% на длинном горизонте.</p>`,
+  },
+  "pt": {
+    title: "PT — Principal Token (Pendle)",
+    body: `<p>Токен на <b>Pendle</b>, который представляет <i>фиксированную доходность</i> до даты maturity.</p>
+<p>Покупаешь PT с дисконтом (например за $0.92), на дату maturity он стоит ровно $1 = твоя гарантированная доходность 8% за период.</p>
+<p>Early exit возможен но с slippage. Идеально — держать до maturity.</p>`,
+  },
+  "lrt": {
+    title: "LRT — Liquid Restaking Token",
+    body: `<p>Токен который представляет твой ETH, застейканный через EigenLayer / Symbiotic / Karak.</p>
+<p>Примеры: eETH (Ether.fi), ezETH (Renzo), rsETH (Kelp), pufETH (Puffer).</p>
+<p>Holding LRT = автоматически получаешь базовый ETH-yield (~3-4%) + AVS rewards + airdrop points будущих проектов.</p>`,
+  },
+  "delta-neutral": {
+    title: "Delta-neutral",
+    body: `<p>Стратегия где твоя позиция <b>не зависит от движения цены</b> актива — только от funding rate / yield.</p>
+<p>Классика: long spot ETH + short perp ETH такого же размера. Если ETH упадёт — long теряет, short зарабатывает, итого 0. А funding-выплаты ты получаешь.</p>
+<p>Risk: liquidation на short perp если ETH резко вырастет и margin кончится.</p>`,
+  },
+  "break-even": {
+    title: "Break-even",
+    body: `<p>Момент, когда заработок от стратегии покрывает fees входа+выхода.</p>
+<p>Пример: $500 × 30% APR funding × N циклов = $1 (fees). N = ~5 циклов = ~40 часов. До этого ты в минусе, после — в плюсе.</p>
+<p>Soomqa показывает break-even в калькуляторе каждой строки.</p>`,
+  },
+  "perpetual": {
+    title: "Perpetual contract (perp)",
+    body: `<p>Фьючерс <b>без даты экспирации</b>. Работает 24/7. Цена близка к споту через механизм funding rate.</p>
+<p>На Bybit/MEXC/Gate/HTX/HL — основные инструменты для деривативной торговли. Поддерживают leverage до 100x (но это safe только для скальперов).</p>`,
+  },
+  "spot": {
+    title: "Spot",
+    body: `<p>Реальный обмен токена — без deals, leverage, без срока. Покупаешь USDT → получаешь BTC.</p>
+<p>В отличие от перпов, спот не имеет funding rate. Долгосрочное holding.</p>`,
+  },
+  "liquidation": {
+    title: "Liquidation",
+    body: `<p>Принудительное закрытие margin-позиции биржей когда margin (залог) близок к нулю.</p>
+<p>Пример: открыл $500 SHORT BTC с 5× leverage = $2500 position, margin $500. Если BTC вырастет на 20% — твой margin = 0, биржа закроет с потерей всех $500.</p>
+<p>В delta-neutral стратегиях нужно держать margin buffer (3-5×) чтобы выдержать волатильность.</p>`,
+  },
+};
+
+// Build a regex that matches any glossary key as a whole word.
+const GLOSSARY_REGEX = new RegExp(
+  "\\b(" + Object.keys(GLOSSARY)
+    .sort((a, b) => b.length - a.length)  // longer first to prevent partial matches
+    .map(k => k.replace(/[-]/g, "\\-"))
+    .join("|") + ")\\b",
+  "gi",
+);
+
+// Wrap glossary terms in any inline HTML string with a clickable span.
+// Skips text inside existing tags (regex applies to bare text only).
+function linkGlossaryTerms(html) {
+  if (!html) return html;
+  // Crude but enough: replace only outside angle-bracket tags. Split by tag,
+  // wrap only on plain-text slices.
+  return html.split(/(<[^>]+>)/g).map((part, i) => {
+    if (i % 2 === 1) return part;  // a tag
+    return part.replace(GLOSSARY_REGEX, (m) => {
+      const key = m.toLowerCase();
+      return `<span class="glossary-term" data-term="${escapeHtml(key)}">${m}</span>`;
+    });
+  }).join("");
+}
+
+function openGlossary(termKey) {
+  const entry = GLOSSARY[termKey] || GLOSSARY[termKey.toLowerCase()];
+  if (!entry) return;
+  const modal = document.getElementById("glossary-modal");
+  const title = document.getElementById("glossary-term");
+  const body = document.getElementById("glossary-body");
+  if (!modal || !title || !body) return;
+  title.textContent = entry.title;
+  body.innerHTML = entry.body;
+  modal.classList.remove("hidden");
+}
+
+document.querySelectorAll("[data-glossary-close]").forEach(el => {
+  el.addEventListener("click", () => {
+    document.getElementById("glossary-modal")?.classList.add("hidden");
+  });
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    document.getElementById("glossary-modal")?.classList.add("hidden");
+  }
+});
+// Event delegation on document because terms appear/disappear in re-rendered HTML.
+document.addEventListener("click", e => {
+  const term = e.target.closest?.(".glossary-term");
+  if (!term) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openGlossary(term.dataset.term);
+});
+
+// ─── Onboarding hint (first-visit only) ──────────────────────────────────────
+
+const ONBOARDING_KEY = "soomqa.onboarding.dismissed.v1";
+if (!localStorage.getItem(ONBOARDING_KEY)) {
+  document.getElementById("onboarding-hint")?.classList.remove("hidden");
+}
+document.getElementById("onboarding-close")?.addEventListener("click", () => {
+  try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch {}
+  document.getElementById("onboarding-hint")?.classList.add("hidden");
 });
 
 // ─── Capital allocator ────────────────────────────────────────────────────────

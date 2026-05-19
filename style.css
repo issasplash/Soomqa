@@ -844,6 +844,90 @@ tbody tr.data-row.expanded {
   font-style: italic;
 }
 
+/* Glossary — underlined clickable terms */
+.glossary-term {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: rgba(124, 92, 255, 0.55);
+  text-underline-offset: 2px;
+  cursor: help;
+  color: inherit;
+}
+.glossary-term:hover {
+  color: #c4b9ff;
+  text-decoration-color: #c4b9ff;
+}
+
+/* Glossary modal */
+.glossary-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.glossary-modal.hidden { display: none; }
+.glossary-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+.glossary-panel {
+  position: relative;
+  background: #1a1a24;
+  border: 1px solid #7c5cff;
+  border-radius: 10px;
+  max-width: 480px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+}
+.glossary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #252533;
+  background: rgba(124, 92, 255, 0.10);
+}
+.glossary-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #fff;
+}
+.glossary-close {
+  background: none;
+  border: none;
+  color: #8a92a6;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.glossary-close:hover { color: #fff; }
+.glossary-body {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #d4d4d8;
+  line-height: 1.55;
+}
+.glossary-body p { margin: 0 0 10px 0; }
+.glossary-body p:last-child { margin-bottom: 0; }
+.glossary-body code {
+  background: #13131a;
+  border: 1px solid #252533;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: #c4b9ff;
+}
+.glossary-body b { color: #fff; }
+
 /* Disabled button state — keeps loading state visually distinct */
 button:disabled {
   opacity: 0.6;

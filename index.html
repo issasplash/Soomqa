@@ -62,6 +62,27 @@
       </div>
     </header>
 
+    <!-- Onboarding hint (shown only on first visit) -->
+    <section id="onboarding-hint" class="hidden mb-6">
+      <div class="bg-gradient-to-br from-accent/15 to-bg-card border border-accent/30 rounded-lg p-4">
+        <div class="flex items-start gap-3">
+          <div class="flex-1">
+            <h2 class="text-base font-semibold text-white mb-1">👋 Привет — что умеет Soomqa</h2>
+            <ul class="text-sm text-zinc-300 space-y-1 mt-2">
+              <li>💼 <b>Распределит капитал</b> по лучшим стратегиям с учётом риска</li>
+              <li>🎯 <b>Даст рекомендацию</b> «стоит / не стоит» с конкретными причинами для каждой строки</li>
+              <li>📋 <b>Расскажет шаги</b> — как открыть позицию: куда зайти, что нажать</li>
+              <li>🔥 <b>Heatmap funding rates</b> — визуально увидеть кросс-биржевые разрывы</li>
+              <li>⚖️ <b>Сравнит позиции</b> — отметь чекбоксами 2-3 строки, увидишь side-by-side</li>
+              <li>🔔 <b>Telegram-алерты</b> — настрой токен бота в Settings → Secrets, узнаешь о спайках первым</li>
+            </ul>
+            <p class="text-xs text-zinc-500 mt-3">Сложные термины подчёркнуты — кликни любой для объяснения.</p>
+          </div>
+          <button id="onboarding-close" class="text-zinc-400 hover:text-white text-lg leading-none" aria-label="Закрыть">×</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Capital allocator: 'у меня $X, разложи по стратегиям' -->
     <section id="allocator" class="mb-6">
       <details class="bg-bg-card border border-border rounded-lg overflow-hidden">
@@ -261,6 +282,18 @@
       <p class="mt-1">Автообновление каждые 60 секунд. <a href="https://github.com/issasplash/soomqa" class="text-accent hover:underline">Исходники</a></p>
     </footer>
 
+  </div>
+
+  <!-- Glossary modal — opens when user clicks any underlined term -->
+  <div id="glossary-modal" class="glossary-modal hidden" role="dialog" aria-modal="true">
+    <div class="glossary-backdrop" data-glossary-close></div>
+    <div class="glossary-panel">
+      <header class="glossary-header">
+        <h3 id="glossary-term">Термин</h3>
+        <button class="glossary-close" data-glossary-close aria-label="Закрыть">×</button>
+      </header>
+      <div id="glossary-body" class="glossary-body"></div>
+    </div>
   </div>
 
   <script src="app.js" defer></script>
