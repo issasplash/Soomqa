@@ -667,6 +667,51 @@ tbody tr.data-row.expanded {
 .risk-4 { background: #fb923c; }    /* оранжевый */
 .risk-5 { background: #f87171; }    /* красный — высокий */
 
+/* Heatmap table */
+.heatmap-table {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+.heatmap-table th,
+.heatmap-table td {
+  padding: 4px 6px;
+  border-radius: 3px;
+  text-align: center;
+  white-space: nowrap;
+}
+.heatmap-corner { background: transparent; }
+.heatmap-symbol-head {
+  color: #8a92a6;
+  font-weight: 500;
+  font-size: 10px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  padding: 6px 2px !important;
+}
+.heatmap-exchange-head {
+  color: #e6e8ee;
+  font-weight: 500;
+  font-size: 11px;
+  text-align: left !important;
+  position: sticky;
+  left: 0;
+  background: #1a1a24;
+  padding: 4px 8px !important;
+  min-width: 100px;
+}
+.heatmap-cell {
+  color: #fff;
+  font-weight: 500;
+  min-width: 38px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+.heatmap-empty {
+  color: #4a4a55;
+  background: #13131a;
+}
+
 /* Disabled button state — keeps loading state visually distinct */
 button:disabled {
   opacity: 0.6;

@@ -182,6 +182,24 @@
       </div>
     </section>
 
+    <!-- Funding-rate heatmap toggle + panel -->
+    <section id="heatmap-section" class="hidden mb-6">
+      <div class="bg-bg-card border border-border rounded-lg overflow-hidden">
+        <div class="flex items-center justify-between px-3 py-2 bg-bg-elev border-b border-border">
+          <h2 class="text-xs uppercase tracking-wide text-zinc-400 font-medium">🔥 Heatmap — funding rates по биржам</h2>
+          <button id="heatmap-close" class="text-zinc-500 hover:text-white text-sm">✕</button>
+        </div>
+        <div id="heatmap-content" class="p-3 overflow-x-auto"></div>
+      </div>
+    </section>
+
+    <!-- Heatmap toggle button (compact, in filter region) -->
+    <div class="mb-4">
+      <button id="heatmap-toggle" class="text-xs text-zinc-400 hover:text-white px-3 py-1.5 border border-border rounded-md bg-bg-card">
+        🔥 Открыть heatmap funding rates
+      </button>
+    </div>
+
     <!-- Errors -->
     <section id="errors" class="hidden bg-amber-950/40 border border-amber-700/50 rounded-lg p-3 mb-4 text-amber-200 text-sm">
       <div class="font-medium mb-1">Часть источников не отвечает:</div>

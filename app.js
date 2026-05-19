@@ -407,6 +407,46 @@ async function fetchGateFunding() {
   }
 }
 
+// Pendle Boros — tokenised funding rate futures. New (Aug 2025) Pendle
+// product that lets you lock in a funding rate as a fixed yield to maturity.
+// Effectively closes the "fixed funding rate" gap I missed in earlier
+// research. API is still in flux; we treat this fetcher as best-effort.
+async function fetchPendleBoros() {
+  try {
+    // Boros markets endpoint. The exact shape may shift between V1 and V2;
+    // we defensively pick the fields we recognise.
+    const data = await getJsonViaCorsFallback("https://api-v2.pendle.finance/core/v1/42161/markets?type=BOROS");
+    const list = Array.isArray(data?.results) ? data.results
+                 : Array.isArray(data?.data) ? data.data
+                 : Array.isArray(data) ? data : [];
+    const rows = list.map(m => {
+      const apr = Number(m.impliedApy ?? m.aprFixed ?? m.fixedApr ?? m.apy ?? 0) * 100;
+      const tvl = Number(m.tvl ?? m.totalValueLocked ?? 0);
+      // Boros markets have a maturity timestamp — calculate days remaining.
+      const maturity = m.maturity ?? m.expiry ?? null;
+      const note = maturity
+        ? `Boros funding lock · maturity ${String(maturity).slice(0, 10)}`
+        : `Boros funding lock`;
+      const symbol = m.name ?? m.symbol ?? m.underlyingSymbol ?? "?";
+      return {
+        source: "Pendle Boros",
+        market: symbol,
+        quote: "",
+        category: "fixed-yield",
+        apr,
+        fixed: true,
+        liquid: tvl >= 1_000_000,
+        note,
+        tvl,
+        poolId: m.address ?? m.id ?? null,
+      };
+    }).filter(r => r.apr > 0 && r.apr < 200);
+    return { ok: true, data: rows };
+  } catch (err) {
+    return { ok: false, source: "Pendle Boros", error: err.message };
+  }
+}
+
 // HTX (formerly Huobi) linear USDT swaps — public batch endpoint.
 async function fetchHtxFunding() {
   try {
@@ -2250,6 +2290,7 @@ async function refreshData() {
     fetchGateFunding(),
     fetchHtxFunding(),
     fetchDefiLlama(),
+    fetchPendleBoros(),
   ]);
 
   const rows = [];
@@ -2369,6 +2410,104 @@ function applyPreset(name) {
 document.querySelectorAll(".preset-btn[data-preset]").forEach(btn => {
   btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
 });
+
+// ─── Heatmap: exchanges (rows) × symbols (cols) → APR colour cells ───────────
+
+const HEATMAP_TOP_N_SYMBOLS = 20;
+
+function renderHeatmap() {
+  const section = document.getElementById("heatmap-section");
+  const content = document.getElementById("heatmap-content");
+  if (!section || !content) return;
+
+  const fundingRows = state.rows.filter(r =>
+    r.category === "funding-rate" && !r.nonCrypto,
+  );
+  if (fundingRows.length === 0) {
+    content.innerHTML = `<p class="text-zinc-500 text-sm text-center py-4">Нет данных funding rates.</p>`;
+    return;
+  }
+
+  // Group by exchange and by symbol
+  const exchanges = [...new Set(fundingRows.map(r => r.source))].sort();
+  // Pick top N symbols by aggregate volume across exchanges
+  const symbolVolume = new Map();
+  for (const r of fundingRows) {
+    symbolVolume.set(r.market, (symbolVolume.get(r.market) ?? 0) + (r.volumeUsd ?? 0));
+  }
+  const symbols = [...symbolVolume.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, HEATMAP_TOP_N_SYMBOLS)
+    .map(([s]) => s);
+
+  // Build cell lookup
+  const cellByKey = new Map();
+  for (const r of fundingRows) {
+    cellByKey.set(`${r.source}|${r.market}`, r);
+  }
+
+  function aprToColor(apr) {
+    if (apr == null) return "#1a1a24";
+    // Scale -50% (red) → 0 (neutral) → +50% (green) → cap
+    const clamped = Math.max(-50, Math.min(50, apr));
+    if (clamped >= 0) {
+      const t = clamped / 50;        // 0..1
+      const r = Math.round(26 + t * (74 - 26));
+      const g = Math.round(26 + t * (222 - 26));
+      const b = Math.round(36 + t * (128 - 36));
+      return `rgb(${r},${g},${b})`;
+    } else {
+      const t = -clamped / 50;
+      const r = Math.round(26 + t * (248 - 26));
+      const g = Math.round(26 + t * (113 - 26));
+      const b = Math.round(36 + t * (113 - 36));
+      return `rgb(${r},${g},${b})`;
+    }
+  }
+
+  // Render as a table with sticky first column
+  let html = `<table class="heatmap-table">`;
+  html += `<thead><tr><th class="heatmap-corner"></th>`;
+  for (const s of symbols) {
+    html += `<th class="heatmap-symbol-head">${escapeHtml(s)}</th>`;
+  }
+  html += `</tr></thead><tbody>`;
+  for (const ex of exchanges) {
+    html += `<tr><th class="heatmap-exchange-head">${escapeHtml(ex)}</th>`;
+    for (const s of symbols) {
+      const row = cellByKey.get(`${ex}|${s}`);
+      if (!row) {
+        html += `<td class="heatmap-cell heatmap-empty">—</td>`;
+      } else {
+        const colour = aprToColor(row.apr);
+        const label = row.apr.toFixed(1);
+        const opacity = row.liquid ? "1" : "0.4";
+        html += `<td class="heatmap-cell" style="background:${colour};opacity:${opacity}" title="${escapeHtml(ex)} · ${escapeHtml(s)} · ${row.apr.toFixed(2)}%">${label}</td>`;
+      }
+    }
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+  html += `<p class="text-[11px] text-zinc-500 mt-3">Цвет: 🟢 ≥+50% · 🔴 ≤−50%. Полупрозрачные ячейки — non-liquid. Топ ${HEATMAP_TOP_N_SYMBOLS} символов по совокупному объёму.</p>`;
+  content.innerHTML = html;
+}
+
+const heatmapToggle = document.getElementById("heatmap-toggle");
+const heatmapSection = document.getElementById("heatmap-section");
+const heatmapClose = document.getElementById("heatmap-close");
+if (heatmapToggle && heatmapSection) {
+  heatmapToggle.addEventListener("click", () => {
+    heatmapSection.classList.remove("hidden");
+    heatmapToggle.classList.add("hidden");
+    renderHeatmap();
+  });
+}
+if (heatmapClose) {
+  heatmapClose.addEventListener("click", () => {
+    heatmapSection.classList.add("hidden");
+    heatmapToggle.classList.remove("hidden");
+  });
+}
 
 // Wallet quick-look — DeBank deep link. We persist the address in localStorage
 // so the user doesn't have to retype it every visit, but never send it anywhere
