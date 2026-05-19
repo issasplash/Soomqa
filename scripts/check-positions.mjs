@@ -525,7 +525,7 @@ async function sendTelegram(text) {
 async function main() {
   console.log("Reading positions…");
   const snaps = (await Promise.all([
-    fetchBinance(),
+    // Binance excluded — not usable in user's region (RU/CIS).
     fetchBybit(),
     fetchOkx(),
     fetchBingX(),

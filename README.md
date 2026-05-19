@@ -21,10 +21,10 @@ https://issasplash.github.io/Soomqa/
 
 ## Что показывает
 
-- **Все perp-рынки** на Binance, Bybit и Hyperliquid (~1700 символов) с funding rates пересчитанными в APR
+- **Все perp-рынки** на Bybit, Hyperliquid, MEXC, Gate.io и HTX (~1500 символов) с funding rates пересчитанными в APR
 - **DeFi доходности** с Aave, Morpho, Spark, Sky, Pendle, Ethena, EigenLayer, Ether.fi, Renzo, Kelp, Puffer — через DefiLlama
 - **Умное определение ликвидности**: каждая строка помечена `liquid: true/false` на основе реальных сигналов — 24h volume, open interest, basis (perp vs spot), `apyBase` vs `apyReward`, флаг `outlier` от DefiLlama
-- **Equity perps** (SNDK/CRCL/QQQ/GOOGL и пр.) автоматически детектируются через `underlyingType` в Binance exchangeInfo и не попадают в "лучший в целом"
+- **Equity perps** автоматически детектируются по metadata биржи и не попадают в "лучший в целом"
 - **Поиск, фильтры по категории, мин/макс APR, чекбокс "только ликвидные"** — фильтры сохраняются в localStorage
 
 Все данные read-only публичные. Без аккаунтов, без кошелька, без API-ключей.
@@ -44,7 +44,7 @@ GitHub Actions опрашивает источники каждые 5 минут
 
 ## Портфельный сканер (опционально)
 
-Раз в 30 минут можно получать в Telegram сводку **по всем твоим открытым позициям** на Binance, Bybit и Hyperliquid — балансы, открытые сделки, нереализованный PnL.
+Раз в 30 минут можно получать в Telegram сводку **по всем твоим открытым позициям** на Bybit, OKX, BingX, MEXC, Gate.io, HTX и Hyperliquid — балансы, открытые сделки, нереализованный PnL.
 
 ### Безопасность
 
@@ -55,10 +55,10 @@ GitHub Actions опрашивает источники каждые 5 минут
 
 ### Создание read-only ключей
 
-Поддерживаются: **Bybit, OKX, BingX, MEXC, Gate.io, HTX, Binance, Hyperliquid**.
+Поддерживаются: **Bybit, OKX, BingX, MEXC, Gate.io, HTX, Hyperliquid**.
 Настраивай только те где торгуешь — остальные пропускаются автоматически.
 
-> **Для пользователей в России / CIS:** Binance официально недоступен. Все остальные биржи из списка работают без VPN.
+> **Binance исключён:** недоступен в РФ/СНГ. Все остальные биржи работают без VPN.
 
 Общий принцип для всех CEX:
 - Создаёшь **API key** с правами **только на чтение** (Read-Only / View)
@@ -73,7 +73,6 @@ GitHub Actions опрашивает источники каждые 5 минут
 | **MEXC** | Profile → API Management → Create | только **Read Info / View** | Futures (Contract) keys; spot не покрывается |
 | **Gate.io** | Settings → API Keys → Create API Key | Futures: только **Read Only** | — |
 | **HTX** | Profile → API Management → Create | Read-only | Linear USDT-M Cross Margin |
-| **Binance** | Profile → API Management → Create | Enable Reading + Enable Futures (без Trading/Withdraw) | Недоступен в РФ |
 | **Hyperliquid** | — | — | Достаточно публичного адреса 0x... |
 
 ### Подключение в GitHub Secrets
@@ -88,7 +87,6 @@ GitHub Actions опрашивает источники каждые 5 минут
 | MEXC | `MEXC_API_KEY`, `MEXC_API_SECRET` |
 | Gate.io | `GATE_API_KEY`, `GATE_API_SECRET` |
 | HTX | `HTX_API_KEY`, `HTX_API_SECRET` |
-| Binance | `BINANCE_API_KEY`, `BINANCE_API_SECRET` |
 | Hyperliquid | `HYPERLIQUID_ADDRESS` (публичный 0x…) |
 
 Уже добавлены: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (от alerts).
@@ -151,7 +149,6 @@ Vanilla JS, без сборки, без фреймворков, без backend.
 
 | Источник | Endpoint | Что покрывает |
 |---|---|---|
-| Binance | `fapi.binance.com/fapi/v1/{premiumIndex,ticker/24hr,exchangeInfo}` | Все USDT/USDC perp funding rates + volume + контракт-метаданные |
 | Bybit | `api.bybit.com/v5/market/tickers?category=linear` | Все linear perp funding rates + turnover + OI |
 | Hyperliquid | `api.hyperliquid.xyz/info` (POST) | Все HL perp funding rates + дневной объём + OI + oraclePx |
 | MEXC | `contract.mexc.com/api/v1/contract/funding_rate/all + ticker` | Все MEXC futures funding rates + объём |

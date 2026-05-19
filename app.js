@@ -2338,7 +2338,9 @@ async function refreshData() {
   }
 
   const results = await Promise.all([
-    fetchBinance(),
+    // Binance intentionally removed — user is in RU/CIS where it's blocked
+    // without VPN, and even funding-rate signals from Binance can't be
+    // arbitraged if he can't physically trade there.
     fetchBybit(),
     fetchHyperliquid(),
     fetchMexcFunding(),

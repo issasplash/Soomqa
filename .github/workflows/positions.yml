@@ -2,8 +2,6 @@
 # posts a consolidated portfolio summary to Telegram. Cron: every 30 min.
 #
 # Required secrets (set any subset you want — missing ones are skipped):
-#   BINANCE_API_KEY          (Binance Futures read-only key — blocked in RU/CIS)
-#   BINANCE_API_SECRET
 #   BYBIT_API_KEY            (Bybit unified read-only key)
 #   BYBIT_API_SECRET
 #   OKX_API_KEY              (OKX read-only key — works in RU/CIS)
@@ -38,8 +36,7 @@ jobs:
 
       - name: Read positions and post to Telegram
         env:
-          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
-          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+          # Binance secrets intentionally omitted — blocked in user's region.
           BYBIT_API_KEY: ${{ secrets.BYBIT_API_KEY }}
           BYBIT_API_SECRET: ${{ secrets.BYBIT_API_SECRET }}
           OKX_API_KEY: ${{ secrets.OKX_API_KEY }}

@@ -496,7 +496,8 @@ function formatAlertBlock(rule, rows) {
 
 async function fetchAll() {
   const results = await Promise.all([
-    fetchBinance(), fetchBybit(), fetchHyperliquid(),
+    // Binance excluded — blocked in user's region (RU/CIS).
+    fetchBybit(), fetchHyperliquid(),
     fetchMexcFunding(), fetchGateFunding(), fetchHtxFunding(),
     fetchDefiLlama(),
   ]);
