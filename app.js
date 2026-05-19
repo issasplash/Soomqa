@@ -2369,6 +2369,32 @@ function applyPreset(name) {
 document.querySelectorAll(".preset-btn[data-preset]").forEach(btn => {
   btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
 });
+
+// Wallet quick-look — DeBank deep link. We persist the address in localStorage
+// so the user doesn't have to retype it every visit, but never send it anywhere
+// from this page; we just open DeBank in a new tab.
+const WALLET_KEY = "soomqa.wallet.v1";
+const walletInput = document.getElementById("wallet-address");
+const walletButton = document.getElementById("open-debank");
+if (walletInput) {
+  walletInput.value = localStorage.getItem(WALLET_KEY) || "";
+  walletInput.addEventListener("input", e => {
+    try { localStorage.setItem(WALLET_KEY, e.target.value.trim()); } catch {}
+  });
+}
+if (walletButton) {
+  walletButton.addEventListener("click", () => {
+    const addr = (walletInput.value || "").trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+      alert("Введи корректный EVM-адрес: 0x… 40 hex-символов.");
+      return;
+    }
+    window.open(`https://debank.com/profile/${addr}`, "_blank", "noopener,noreferrer");
+  });
+  walletInput?.addEventListener("keydown", e => {
+    if (e.key === "Enter") walletButton.click();
+  });
+}
 els.category.addEventListener("change", e => {
   state.filters.category = e.target.value;
   saveFilters();

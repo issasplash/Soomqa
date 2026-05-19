@@ -71,6 +71,29 @@
       <div id="positions-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
     </section>
 
+    <!-- Wallet quick-look: paste 0x... address → deep link to DeBank for full
+         DeFi portfolio (Aave / Compound / Pendle / Ethena / restaking / NFTs).
+         No data ever leaves the browser; we just open DeBank in a new tab. -->
+    <section id="wallet-watch" class="mb-6">
+      <div class="bg-bg-card border border-border rounded-lg p-3">
+        <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <label class="text-xs text-zinc-400 uppercase tracking-wide whitespace-nowrap">🔍 Кошелёк</label>
+          <input
+            id="wallet-address"
+            type="text"
+            placeholder="0x... любой публичный адрес"
+            class="flex-1 bg-bg-elev border border-border rounded-md px-3 py-2 text-sm font-mono placeholder-zinc-500 focus:outline-none focus:border-accent"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="open-debank" class="px-3 py-2 bg-bg-elev border border-border rounded-md text-sm text-zinc-300 hover:border-accent hover:text-white transition whitespace-nowrap" type="button">
+            Открыть в DeBank →
+          </button>
+        </div>
+        <p class="text-[11px] text-zinc-500 mt-2">DeBank покажет твой полный DeFi-портфель: Aave / Pendle / Ethena / LRTs / spot токены. Данные не покидают браузер — мы просто открываем ссылку.</p>
+      </div>
+    </section>
+
     <!-- Summary cards -->
     <section id="summary" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
       <div class="bg-bg-card border border-border rounded-lg p-3">

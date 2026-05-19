@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write    # needed to commit hourly history snapshots back to repo
 
 concurrency:
   group: alerts
@@ -46,3 +46,17 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: node scripts/check-yields.mjs
+
+      # Append-only history file gets a new line at most once per hour per
+      # row. Skip the commit if nothing changed (git diff --staged returns 0).
+      - name: Commit history snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/history/ 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No history changes to commit."
+          else
+            git commit -m "history: snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi

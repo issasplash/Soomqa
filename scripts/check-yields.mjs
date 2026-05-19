@@ -11,7 +11,7 @@
 // spam the chat every 15 minutes. The GitHub Actions cache action persists
 // this directory between runs.
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, appendFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
 const CACHE_DIR = "scripts/.cache";
@@ -51,7 +51,107 @@ const ALERT_RULES = [
     match: r => r.category === "cross-exchange-spread" && r.liquid && r.apr >= 20,
     cooldownHours: 4,
   },
+  // ── Composite rules — multiple conditions AND'd together ─────────────────
+  // These exist to catch *sustainable* opportunities the simple thresholds
+  // miss: high APR alone is noisy, but APR + volume + basis-converged is
+  // a real arbitrage signal worth waking the user for.
+  {
+    id: "sustainable-funding-spike",
+    label: "🔥 Устойчивый funding-спайк",
+    match: r =>
+      r.category === "funding-rate" &&
+      r.liquid &&
+      !r.nonCrypto &&
+      r.apr >= 30 &&
+      (r.volumeUsd ?? 0) >= 50_000_000 &&         // deep market
+      (r.basis == null || Math.abs(r.basis) < 0.005),  // basis already converged → APR is real, not arb-in-progress
+    cooldownHours: 6,
+  },
+  {
+    id: "deep-stable-yield",
+    label: "💎 Глубокий стейбл-yield",
+    match: r =>
+      r.category === "stable-lending" &&
+      r.liquid &&
+      r.apr >= 7 &&
+      (r.tvl ?? 0) >= 200_000_000,
+    cooldownHours: 24,
+  },
+  {
+    id: "exceptional-spread",
+    label: "⚡ Жирный cross-spread",
+    match: r =>
+      r.category === "cross-exchange-spread" &&
+      r.liquid &&
+      r.apr >= 40 &&
+      r.longLeg && r.shortLeg &&
+      r.longLeg.liquid && r.shortLeg.liquid,
+    cooldownHours: 3,
+  },
 ];
+
+// ─── Historical snapshot writer ──────────────────────────────────────────────
+//
+// Append-only JSONL files at data/history/YYYY-MM-DD.jsonl. One line per
+// (row × hour); we skip a write for any row we've already snapshotted within
+// the current hour, so repeated 5-min runs don't bloat history.
+//
+// Foundation for the backtesting feature: after a month of data we can
+// compute "what would $1000 in this pool have earned over the last 30 days".
+
+const HISTORY_DIR = "data/history";
+
+async function recordHistorySnapshot(rows) {
+  const interesting = rows.filter(r =>
+    r.liquid &&
+    !r.nonCrypto &&
+    ["funding-rate", "fixed-yield", "stable-lending", "delta-neutral",
+     "restaking", "cross-exchange-spread"].includes(r.category),
+  );
+  if (interesting.length === 0) return;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const filepath = `${HISTORY_DIR}/${today}.jsonl`;
+  await mkdir(HISTORY_DIR, { recursive: true });
+
+  // Build a set of keys already written within the current hour — used to
+  // dedupe within-the-hour writes. Cheap: just scan today's file.
+  const seenThisHour = new Set();
+  const oneHourAgoMs = Date.now() - 60 * 60 * 1000;
+  if (existsSync(filepath)) {
+    try {
+      const existing = await readFile(filepath, "utf8");
+      for (const line of existing.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const rec = JSON.parse(line);
+          if (rec.t >= oneHourAgoMs) seenThisHour.add(rec.k);
+        } catch {}
+      }
+    } catch {}
+  }
+
+  const now = Date.now();
+  const newLines = [];
+  for (const r of interesting) {
+    const key = `${r.source}|${r.market}|${r.category}`;
+    if (seenThisHour.has(key)) continue;
+    newLines.push(JSON.stringify({
+      t: now,
+      k: key,
+      apr: Number(r.apr.toFixed(4)),
+      liq: 1,
+    }));
+  }
+
+  if (newLines.length === 0) {
+    console.log(`[history] No new hourly entries for ${today} (${seenThisHour.size} already written).`);
+    return;
+  }
+
+  await appendFile(filepath, newLines.join("\n") + "\n");
+  console.log(`[history] Appended ${newLines.length} entries to ${filepath}`);
+}
 
 // ─── Shared constants (mirrors app.js — keep in sync) ─────────────────────────
 
@@ -416,6 +516,14 @@ async function runAlerts() {
   const { rows, failures } = await fetchAll();
   console.log(`Got ${rows.length} rows; failures: ${failures.length}`);
   for (const f of failures) console.warn(`  ${f.source}: ${f.error}`);
+
+  // Append to historical record before triggering alerts — even if alert
+  // logic fails (e.g. Telegram down), we still capture the snapshot.
+  try {
+    await recordHistorySnapshot(rows);
+  } catch (err) {
+    console.warn("[history] Failed to record snapshot:", err.message);
+  }
 
   const sent = await loadSentCache();
   const now = Date.now();
