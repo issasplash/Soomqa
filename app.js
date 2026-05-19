@@ -541,15 +541,23 @@ async function fetchDefiLlama() {
         const apyReward = p.apyReward == null ? null : Number(p.apyReward);
         const apyMean30d = p.apyMean30d == null ? null : Number(p.apyMean30d);
 
-        // Liquid = enough TVL + we have a base yield component (real interest
-        // or RWA yield, not just emissions) OR the 30-day mean confirms the
-        // headline APR isn't a fresh spike. The DefiLlama `outlier` flag is
-        // an explicit "trust us, this is anomalous" — always reject those.
+        // Liquidity check depends on category. Stable-lending APR can be
+        // inflated by transient emission rewards, so we require base/30d
+        // smoothed to confirm. Fixed-yield (Pendle PT), delta-neutral
+        // (Ethena), and restaking pools don't split into base+reward —
+        // they're contractual/packaged yields. For those, TVL + outlier
+        // flag is the honest signal; requiring apyBase would mark them
+        // all non-liquid incorrectly.
         const tvl = Number(p.tvlUsd) || 0;
-        const baseDominates = apyBase != null && apyBase >= apr * 0.5;
-        const smoothedAgrees = apyMean30d != null && apyMean30d >= apr * 0.6;
-        const tvlSubstantial = tvl >= rule.minTvl * 2;  // double the rule's floor
-        const liquid = !p.outlier && (baseDominates || smoothedAgrees) && tvlSubstantial;
+        const tvlSubstantial = tvl >= rule.minTvl * 2;
+        let liquid;
+        if (rule.category === "stable-lending") {
+          const baseDominates = apyBase != null && apyBase >= apr * 0.5;
+          const smoothedAgrees = apyMean30d != null && apyMean30d >= apr * 0.6;
+          liquid = !p.outlier && (baseDominates || smoothedAgrees) && tvlSubstantial;
+        } else {
+          liquid = !p.outlier && tvlSubstantial;
+        }
 
         const noteParts = [rule.note];
         if (apyBase != null && apyReward != null && apyReward > apyBase) {
@@ -2712,49 +2720,87 @@ document.getElementById("onboarding-close")?.addEventListener("click", () => {
 // available, while still forcing diversification (no putting 100% into
 // the single hottest Pendle PT).
 
+// Allocator caps per category — how much of total capital is allowed in this
+// strategy band. Bumped vs the previous version because stable + PT are
+// genuinely safe at higher concentration than 50% / 40%.
 const CATEGORY_ALLOC_CAP = {
-  "stable-lending":        0.50,  // up to 50% — это safe layer
-  "fixed-yield":           0.40,
-  "delta-neutral":         0.25,  // Ethena yield variable
+  "stable-lending":        0.60,
+  "fixed-yield":           0.50,
+  "delta-neutral":         0.30,
   "restaking":             0.20,
-  "cross-exchange-spread": 0.20,  // requires capital on 2 venues
-  "funding-rate":          0.15,  // single-venue, sensitive to spike decay
+  "cross-exchange-spread": 0.20,
+  "funding-rate":          0.15,
   "leveraged-stable":      0.10,
 };
-const PER_POSITION_MAX_PCT = 0.30;  // никогда больше 30% в одну строку
-const MIN_TICKET_USD = 50;          // под $50 не имеет смысла открывать
+
+// Tier order: SAFEST first. Allocator fills tier-by-tier — only moves on to
+// the next risk tier if it couldn't place capital in the previous one. This
+// is the user's expectation: if Aave USDC at 5.8% has room, put money there
+// before reaching for cross-exchange-spread at 6.1% just because the APR is
+// numerically higher.
+const TIER_ORDER = [
+  ["stable-lending"],                       // tier 1: protocol risk only
+  ["fixed-yield"],                          // tier 2: Pendle PT
+  ["delta-neutral"],                        // tier 3: packaged arb (Ethena)
+  ["restaking"],                            // tier 4: LRTs
+  ["cross-exchange-spread", "funding-rate"],// tier 5: active strategies
+  ["leveraged-stable"],                     // tier 6: looped lending
+];
+
+const PER_POSITION_MAX_PCT = 0.30;  // single row never > 30%
+const MIN_TICKET_USD = 50;
+const MAX_POSITIONS = 7;
 
 function computeAllocation(totalUsd, maxRisk) {
   if (totalUsd < MIN_TICKET_USD * 2) {
     return { allocations: [], unallocated: totalUsd, note: `Минимум $${MIN_TICKET_USD * 2} для разумной диверсификации` };
   }
 
-  // Universe: liquid, non-suspect, risk ≤ user's tolerance, excluding the
-  // synthetic Cross-exchange rows (we keep them but with the spread cap).
-  const candidates = state.rows
-    .filter(r => r.liquid && !r.suspect && riskScoreFor(r) <= maxRisk && r.apr > 0)
-    .sort((a, b) => b.apr - a.apr);
+  // Universe: liquid, non-suspect, risk ≤ user's tolerance, positive APR.
+  const universe = state.rows
+    .filter(r => r.liquid && !r.suspect && riskScoreFor(r) <= maxRisk && r.apr > 0);
 
-  const categoryTotals = new Map();
+  // Group by category, sort each by APR descending.
+  const byCat = new Map();
+  for (const r of universe) {
+    if (!byCat.has(r.category)) byCat.set(r.category, []);
+    byCat.get(r.category).push(r);
+  }
+  for (const arr of byCat.values()) arr.sort((a, b) => b.apr - a.apr);
+
   const allocations = [];
+  const categoryTotals = new Map();
   let remaining = totalUsd;
   const perPositionMax = totalUsd * PER_POSITION_MAX_PCT;
 
-  for (const row of candidates) {
+  // Walk through risk tiers — fill safer ones first up to their cap, then move
+  // on. Within a tier, rows are sorted by APR descending across all categories
+  // in that tier so the best-yielding safe option lands first.
+  for (const tier of TIER_ORDER) {
     if (remaining < MIN_TICKET_USD) break;
-    const cap = (CATEGORY_ALLOC_CAP[row.category] ?? 0.10) * totalUsd;
-    const inCat = categoryTotals.get(row.category) ?? 0;
-    const room = cap - inCat;
-    if (room < MIN_TICKET_USD) continue;
-    const amount = Math.min(remaining, perPositionMax, room);
-    if (amount < MIN_TICKET_USD) continue;
-    allocations.push({ row, amount: Math.round(amount) });
-    categoryTotals.set(row.category, inCat + amount);
-    remaining -= amount;
-    if (allocations.length >= 7) break;
+    if (allocations.length >= MAX_POSITIONS) break;
+
+    const tierRows = [];
+    for (const cat of tier) {
+      for (const r of (byCat.get(cat) || [])) tierRows.push(r);
+    }
+    tierRows.sort((a, b) => b.apr - a.apr);
+
+    for (const row of tierRows) {
+      if (remaining < MIN_TICKET_USD) break;
+      if (allocations.length >= MAX_POSITIONS) break;
+      const cap = (CATEGORY_ALLOC_CAP[row.category] ?? 0.10) * totalUsd;
+      const inCat = categoryTotals.get(row.category) ?? 0;
+      const room = cap - inCat;
+      if (room < MIN_TICKET_USD) continue;
+      const amount = Math.min(remaining, perPositionMax, room);
+      if (amount < MIN_TICKET_USD) continue;
+      allocations.push({ row, amount: Math.round(amount) });
+      categoryTotals.set(row.category, inCat + amount);
+      remaining -= amount;
+    }
   }
 
-  // Estimate annual income from the proposed allocation
   let annualIncome = 0;
   for (const a of allocations) {
     annualIncome += a.amount * (a.row.apr / 100);
