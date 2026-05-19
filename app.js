@@ -2720,14 +2720,15 @@ document.getElementById("onboarding-close")?.addEventListener("click", () => {
 // available, while still forcing diversification (no putting 100% into
 // the single hottest Pendle PT).
 
-// Allocator caps per category — how much of total capital is allowed in this
-// strategy band. Bumped vs the previous version because stable + PT are
-// genuinely safe at higher concentration than 50% / 40%.
+// Allocator caps per category. Stable+PT can safely take a much larger share
+// than originally allowed — Aave/Morpho/Sky are three different protocols and
+// PT-USDe vs PT-sUSDe are different maturity products, so the diversification
+// happens *within* the category rather than across categories.
 const CATEGORY_ALLOC_CAP = {
-  "stable-lending":        0.60,
-  "fixed-yield":           0.50,
-  "delta-neutral":         0.30,
-  "restaking":             0.20,
+  "stable-lending":        0.75,  // bumped from 0.60
+  "fixed-yield":           0.65,  // bumped from 0.50
+  "delta-neutral":         0.35,  // bumped from 0.30
+  "restaking":             0.25,
   "cross-exchange-spread": 0.20,
   "funding-rate":          0.15,
   "leveraged-stable":      0.10,
@@ -2751,16 +2752,14 @@ const PER_POSITION_MAX_PCT = 0.30;  // single row never > 30%
 const MIN_TICKET_USD = 50;
 const MAX_POSITIONS = 7;
 
-function computeAllocation(totalUsd, maxRisk) {
+function computeAllocation(totalUsd, maxRisk, mode = "diversified") {
   if (totalUsd < MIN_TICKET_USD * 2) {
     return { allocations: [], unallocated: totalUsd, note: `Минимум $${MIN_TICKET_USD * 2} для разумной диверсификации` };
   }
 
-  // Universe: liquid, non-suspect, risk ≤ user's tolerance, positive APR.
   const universe = state.rows
     .filter(r => r.liquid && !r.suspect && riskScoreFor(r) <= maxRisk && r.apr > 0);
 
-  // Group by category, sort each by APR descending.
   const byCat = new Map();
   for (const r of universe) {
     if (!byCat.has(r.category)) byCat.set(r.category, []);
@@ -2773,44 +2772,56 @@ function computeAllocation(totalUsd, maxRisk) {
   let remaining = totalUsd;
   const perPositionMax = totalUsd * PER_POSITION_MAX_PCT;
 
-  // Walk through risk tiers — fill safer ones first up to their cap, then move
-  // on. Within a tier, rows are sorted by APR descending across all categories
-  // in that tier so the best-yielding safe option lands first.
-  for (const tier of TIER_ORDER) {
-    if (remaining < MIN_TICKET_USD) break;
-    if (allocations.length >= MAX_POSITIONS) break;
+  // 'concentrated' mode ignores category caps — pure greedy-by-APR within
+  // the user's risk budget, only constrained by per-position max (30%).
+  // Useful when the user has high conviction in one strategy band and
+  // doesn't want forced diversification into lower-APR alternatives.
+  const useCategoryCaps = mode !== "concentrated";
 
-    const tierRows = [];
-    for (const cat of tier) {
-      for (const r of (byCat.get(cat) || [])) tierRows.push(r);
-    }
-    tierRows.sort((a, b) => b.apr - a.apr);
-
-    for (const row of tierRows) {
+  if (useCategoryCaps) {
+    // Tiered safety-first walk
+    for (const tier of TIER_ORDER) {
       if (remaining < MIN_TICKET_USD) break;
       if (allocations.length >= MAX_POSITIONS) break;
-      const cap = (CATEGORY_ALLOC_CAP[row.category] ?? 0.10) * totalUsd;
-      const inCat = categoryTotals.get(row.category) ?? 0;
-      const room = cap - inCat;
-      if (room < MIN_TICKET_USD) continue;
-      const amount = Math.min(remaining, perPositionMax, room);
+      const tierRows = [];
+      for (const cat of tier) for (const r of (byCat.get(cat) || [])) tierRows.push(r);
+      tierRows.sort((a, b) => b.apr - a.apr);
+      for (const row of tierRows) {
+        if (remaining < MIN_TICKET_USD) break;
+        if (allocations.length >= MAX_POSITIONS) break;
+        const cap = (CATEGORY_ALLOC_CAP[row.category] ?? 0.10) * totalUsd;
+        const inCat = categoryTotals.get(row.category) ?? 0;
+        const room = cap - inCat;
+        if (room < MIN_TICKET_USD) continue;
+        const amount = Math.min(remaining, perPositionMax, room);
+        if (amount < MIN_TICKET_USD) continue;
+        allocations.push({ row, amount: Math.round(amount) });
+        categoryTotals.set(row.category, inCat + amount);
+        remaining -= amount;
+      }
+    }
+  } else {
+    // Concentrated: pure greedy by APR, only per-position cap.
+    const sorted = [...universe].sort((a, b) => b.apr - a.apr);
+    for (const row of sorted) {
+      if (remaining < MIN_TICKET_USD) break;
+      if (allocations.length >= MAX_POSITIONS) break;
+      const amount = Math.min(remaining, perPositionMax);
       if (amount < MIN_TICKET_USD) continue;
       allocations.push({ row, amount: Math.round(amount) });
-      categoryTotals.set(row.category, inCat + amount);
       remaining -= amount;
     }
   }
 
   let annualIncome = 0;
-  for (const a of allocations) {
-    annualIncome += a.amount * (a.row.apr / 100);
-  }
+  for (const a of allocations) annualIncome += a.amount * (a.row.apr / 100);
 
   return {
     allocations,
     unallocated: Math.max(0, Math.round(remaining)),
     annualIncome,
     monthlyIncome: annualIncome / 12,
+    mode,
   };
 }
 
@@ -2873,7 +2884,12 @@ function renderAllocation(plan) {
       <span>Остаток: <b>$${plan.unallocated}</b></span>
       <span>Ожидаемый доход: <b class="text-emerald-400">+$${plan.monthlyIncome.toFixed(2)}/мес</b> · <span class="text-zinc-400">+$${plan.annualIncome.toFixed(2)}/год</span></span>
     </div>
-    <p class="text-[11px] text-zinc-500 mt-2">⚠ Оценка линейная (без compound). APR могут меняться. Это suggested allocation — не инвестрекомендация.</p>
+    <p class="text-[11px] text-zinc-500 mt-2">
+      ${plan.mode === "concentrated"
+        ? "🎯 Режим <b>Максимум APR</b>: только per-position cap 30%, без category-caps. Концентрация в топ-APR стратегиях."
+        : "📊 Режим <b>Диверсификация</b>: capы по категориям защищают от single-protocol risk (stable ≤75%, PT ≤65%, δ-нейтрал ≤35%)."}
+    </p>
+    <p class="text-[11px] text-zinc-500 mt-1">⚠ Оценка линейная (без compound). APR могут меняться. Это suggested allocation — не инвестрекомендация.</p>
   `;
   root.classList.remove("hidden");
 
@@ -2929,27 +2945,29 @@ function jumpToRowByKey(key) {
 // Wire allocator inputs
 const allocTotal = document.getElementById("alloc-total");
 const allocRisk = document.getElementById("alloc-risk");
+const allocMode = document.getElementById("alloc-mode");
 const allocCompute = document.getElementById("alloc-compute");
 if (allocCompute && allocTotal && allocRisk) {
-  // Restore last values from localStorage
   try {
     const saved = JSON.parse(localStorage.getItem("soomqa.allocator.v1") || "{}");
     if (saved.total) allocTotal.value = saved.total;
     if (saved.risk) allocRisk.value = saved.risk;
+    if (saved.mode && allocMode) allocMode.value = saved.mode;
   } catch {}
 
   function runAllocator() {
     const total = Number(allocTotal.value) || 0;
     const risk = Number(allocRisk.value) || 3;
+    const mode = allocMode?.value || "diversified";
     try {
-      localStorage.setItem("soomqa.allocator.v1", JSON.stringify({ total, risk }));
+      localStorage.setItem("soomqa.allocator.v1", JSON.stringify({ total, risk, mode }));
     } catch {}
     if (state.rows.length === 0) {
       document.getElementById("alloc-result").innerHTML = `<p class="text-zinc-500 text-sm">Подожди первой загрузки данных…</p>`;
       document.getElementById("alloc-result").classList.remove("hidden");
       return;
     }
-    const plan = computeAllocation(total, risk);
+    const plan = computeAllocation(total, risk, mode);
     renderAllocation(plan);
   }
   allocCompute.addEventListener("click", runAllocator);

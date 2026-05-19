@@ -104,6 +104,13 @@
                 <option value="4">≤ 4 (агрессивно)</option>
               </select>
             </div>
+            <div class="flex flex-col gap-1">
+              <label class="text-[10px] text-zinc-500 uppercase tracking-wide">Стратегия</label>
+              <select id="alloc-mode" class="bg-bg-elev border border-border rounded-md px-2 py-2 text-sm">
+                <option value="diversified" selected>📊 Диверсификация</option>
+                <option value="concentrated">🎯 Максимум APR</option>
+              </select>
+            </div>
             <button id="alloc-compute" class="px-4 py-2 bg-accent text-white rounded-md text-sm font-medium hover:bg-accent-muted">Рассчитать</button>
           </div>
           <div id="alloc-result" class="hidden"></div>
