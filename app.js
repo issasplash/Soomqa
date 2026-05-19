@@ -2834,8 +2834,9 @@ function renderAllocation(plan) {
     const risk = riskScoreFor(a.row);
     const monthly = a.amount * (a.row.apr / 100) / 12;
     const pctOfTotal = ((a.amount / (totalAllocated + plan.unallocated)) * 100).toFixed(0);
+    const key = escapeHtml(rowKey(a.row));
     return `
-      <tr class="border-b border-border/30">
+      <tr class="alloc-row" data-alloc-key="${key}" title="Открыть детально в таблице">
         <td class="px-2 py-2 font-mono text-xs text-zinc-200">$${a.amount}</td>
         <td class="px-2 py-2 text-zinc-400 text-xs">${pctOfTotal}%</td>
         <td class="px-2 py-2 text-zinc-100 text-xs">${escapeHtml(a.row.source)}<br><span class="font-mono text-zinc-500">${escapeHtml(a.row.market)}</span></td>
@@ -2843,13 +2844,15 @@ function renderAllocation(plan) {
         <td class="px-2 py-2 text-right font-mono text-xs ${aprColourClass(a.row.apr)}">${a.row.apr.toFixed(2)}%</td>
         <td class="px-2 py-2"><span class="risk-dot ${riskColourClass(risk)}"></span></td>
         <td class="px-2 py-2 text-right font-mono text-xs pos">+$${monthly.toFixed(2)}/мес</td>
+        <td class="px-2 py-2 text-zinc-500 text-xs">→</td>
       </tr>
     `;
   }).join("");
 
   root.innerHTML = `
+    <p class="text-[11px] text-zinc-500 mb-2">Кликни строку — провалишься в таблицу с калькулятором этой позиции.</p>
     <div class="overflow-x-auto">
-      <table class="w-full text-xs">
+      <table class="w-full text-xs alloc-table">
         <thead class="text-[10px] uppercase tracking-wide text-zinc-500">
           <tr>
             <th class="text-left px-2 py-1">Сумма</th>
@@ -2859,6 +2862,7 @@ function renderAllocation(plan) {
             <th class="text-right px-2 py-1">APR</th>
             <th class="text-left px-2 py-1">Риск</th>
             <th class="text-right px-2 py-1">Доход/мес</th>
+            <th class="text-left px-2 py-1"></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -2872,6 +2876,54 @@ function renderAllocation(plan) {
     <p class="text-[11px] text-zinc-500 mt-2">⚠ Оценка линейная (без compound). APR могут меняться. Это suggested allocation — не инвестрекомендация.</p>
   `;
   root.classList.remove("hidden");
+
+  // Wire row clicks: jump from allocator row to the full table entry. We
+  // reset filters to ensure the row is visible, expand it (calculator opens),
+  // then scroll the page to it.
+  root.querySelectorAll(".alloc-row").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const key = tr.dataset.allocKey;
+      jumpToRowByKey(key);
+    });
+  });
+}
+
+function jumpToRowByKey(key) {
+  if (!key) return;
+  // Find the row in current state.
+  const target = state.rows.find(r => rowKey(r) === key);
+  if (!target) return;
+  // Reset filters that could hide it; preserve sort/watchlist preference.
+  state.filters.search = "";
+  state.filters.category = "";
+  state.filters.minApr = null;
+  state.filters.maxApr = null;
+  state.filters.liquidOnly = false;
+  state.filters.watchlistOnly = false;
+  // Reflect into inputs.
+  els.search.value = "";
+  els.category.value = "";
+  els.minApr.value = "";
+  els.maxApr.value = "";
+  els.liquidOnly.checked = false;
+  els.watchlistOnly.checked = false;
+  saveFilters();
+  // Make sure the parent group isn't collapsed.
+  state.collapsedGroups.delete(target.category);
+  // Make sure rows beyond default limit are visible.
+  state.showAllGroups.add(target.category);
+  // Re-render so visibleRows reflects the new state, then find the new index.
+  render();
+  const idx = state.visibleRows.findIndex(r => rowKey(r) === key);
+  if (idx >= 0) {
+    state.expandedRowIndex = idx;
+    render();
+    // Scroll the row into view after the DOM settles.
+    requestAnimationFrame(() => {
+      const tr = els.rows.querySelector(`tr[data-row-index="${idx}"]`);
+      if (tr) tr.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
 }
 
 // Wire allocator inputs
