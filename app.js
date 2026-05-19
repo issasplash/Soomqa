@@ -178,18 +178,23 @@ const PERP_LIQUID_OI_USD = 5_000_000;
 const PERP_SPIKE_BASIS_THRESHOLD = 0.003;
 
 function makePerpRow({ source, market, quote, apr, period, volumeUsd, openInterestUsd, basis, nonCrypto }) {
+  // Sanity bound. No real perpetual funding rate sustains ±500% APR — values
+  // above that are virtually always API data errors, abandoned markets, or
+  // single-cycle spikes about to revert. We keep the row in the table for
+  // visibility but mark it as suspect so it never feeds summary cards or
+  // recommendations.
+  const SUSPECT_APR = 500;
+  const suspect = Math.abs(apr) > SUSPECT_APR;
+
   const hasDepth = (volumeUsd >= PERP_LIQUID_VOLUME_USD) ||
                    (openInterestUsd >= PERP_LIQUID_OI_USD);
   const inActiveSpike = basis != null && Math.abs(basis) > PERP_SPIKE_BASIS_THRESHOLD;
-  // nonCrypto = equity/index perps (Binance SNDK, CRCL, QQQ, GOOGL, etc.).
-  // They have *structurally* high funding because retail can't easily hedge
-  // 24/7 against the US stock market — funding isn't going to mean-revert
-  // to 0 like a memecoin spike. But that's not a yield you can capture
-  // without exotic spot access, so we hide it from sustainable signals.
-  const liquid = hasDepth && !inActiveSpike && !nonCrypto;
+  const liquid = hasDepth && !inActiveSpike && !nonCrypto && !suspect;
 
   const noteParts = [`${period} funding`];
-  if (nonCrypto) {
+  if (suspect) {
+    noteParts.push("⚠ аномальная ставка — скорее всего ошибка данных");
+  } else if (nonCrypto) {
     noteParts.push("equity/index perp — нет лёгкого хеджа на споте");
   } else if (!hasDepth) {
     noteParts.push("тонкая ликвидность — APR быстро меняется");
@@ -205,6 +210,7 @@ function makePerpRow({ source, market, quote, apr, period, volumeUsd, openIntere
     apr,
     fixed: false,
     liquid,
+    suspect,
     note: noteParts.join(" · "),
     volumeUsd, openInterestUsd, basis, nonCrypto,
   };
@@ -381,9 +387,12 @@ async function fetchGateFunding() {
   try {
     const data = await getJsonViaCorsFallback("https://api.gateio.ws/api/v4/futures/usdt/contracts");
     const rows = (Array.isArray(data) ? data : []).map(r => {
-      // Some Gate contracts use 1h funding interval, most are 8h. Derive
-      // the period from `funding_interval` (seconds) so APR is correct.
-      const intervalSec = Number(r.funding_interval) || 28800;
+      // Clamp interval to a sane range. Some Gate contracts return interval=0
+      // or absurdly small values (test/abandoned markets) which makes the APR
+      // calculation explode into thousands of percent. Real funding intervals
+      // are always between 1 hour and 8 hours.
+      const rawInterval = Number(r.funding_interval) || 28800;
+      const intervalSec = Math.min(28800, Math.max(3600, rawInterval));
       const periodsPerYear = (365 * 24 * 3600) / intervalSec;
       const apr = Number(r.funding_rate ?? 0) * periodsPerYear * 100;
       const market = r.name.replace(/_USDT$/, "");
@@ -2283,7 +2292,7 @@ const SPREAD_MIN_APR_TO_SURFACE = 3;  // hide micro-spreads — pure noise
 
 function computeCrossExchangeSpreads(rows) {
   const fundingRows = rows.filter(r =>
-    r.category === "funding-rate" && !r.nonCrypto,
+    r.category === "funding-rate" && !r.nonCrypto && !r.suspect,
   );
   const bySymbol = new Map();
   for (const r of fundingRows) {

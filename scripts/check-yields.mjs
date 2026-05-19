@@ -195,12 +195,14 @@ const postJson = (url, body) => getJson(url, {
 });
 
 function makePerpRow({ source, market, quote, apr, period, volumeUsd, openInterestUsd, basis, nonCrypto }) {
+  const suspect = Math.abs(apr) > 500;  // anomaly guard — see app.js
   const hasDepth = (volumeUsd >= PERP_LIQUID_VOLUME_USD) ||
                    (openInterestUsd >= PERP_LIQUID_OI_USD);
   const inActiveSpike = basis != null && Math.abs(basis) > PERP_SPIKE_BASIS_THRESHOLD;
-  const liquid = hasDepth && !inActiveSpike && !nonCrypto;
+  const liquid = hasDepth && !inActiveSpike && !nonCrypto && !suspect;
   return {
     source, market, quote, apr, basis, volumeUsd, openInterestUsd, nonCrypto,
+    suspect,
     category: "funding-rate", fixed: false, liquid,
   };
 }
@@ -312,7 +314,8 @@ async function fetchGateFunding() {
   try {
     const data = await getJson("https://api.gateio.ws/api/v4/futures/usdt/contracts");
     const rows = (Array.isArray(data) ? data : []).map(r => {
-      const intervalSec = Number(r.funding_interval) || 28800;
+      const rawInterval = Number(r.funding_interval) || 28800;
+      const intervalSec = Math.min(28800, Math.max(3600, rawInterval));
       const periodsPerYear = (365 * 24 * 3600) / intervalSec;
       const apr = Number(r.funding_rate ?? 0) * periodsPerYear * 100;
       const market = r.name.replace(/_USDT$/, "");
@@ -348,7 +351,7 @@ async function fetchHtxFunding() {
 // Same logic as the browser's computeCrossExchangeSpreads — keep them in sync.
 function computeCrossExchangeSpreads(rows) {
   const fundingRows = rows.filter(r =>
-    r.category === "funding-rate" && !r.nonCrypto && r.market,
+    r.category === "funding-rate" && !r.nonCrypto && !r.suspect && r.market,
   );
   const bySymbol = new Map();
   for (const r of fundingRows) {
