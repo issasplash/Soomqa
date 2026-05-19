@@ -62,6 +62,34 @@
       </div>
     </header>
 
+    <!-- Capital allocator: 'у меня $X, разложи по стратегиям' -->
+    <section id="allocator" class="mb-6">
+      <details class="bg-bg-card border border-border rounded-lg overflow-hidden">
+        <summary class="px-3 py-2 bg-bg-elev cursor-pointer text-sm font-medium text-zinc-200">
+          💼 Распределить капитал
+        </summary>
+        <div class="p-3 flex flex-col gap-3">
+          <p class="text-xs text-zinc-500">Введи сумму и приемлемый уровень риска — Soomqa предложит как разделить деньги между лучшими ликвидными стратегиями с учётом diversification.</p>
+          <div class="flex flex-wrap gap-2 items-end">
+            <div class="flex flex-col gap-1">
+              <label class="text-[10px] text-zinc-500 uppercase tracking-wide">Сумма USD</label>
+              <input id="alloc-total" type="number" inputmode="decimal" placeholder="1000" min="100" step="100" class="w-32 bg-bg-elev border border-border rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:border-accent" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="text-[10px] text-zinc-500 uppercase tracking-wide">Макс. риск</label>
+              <select id="alloc-risk" class="bg-bg-elev border border-border rounded-md px-2 py-2 text-sm">
+                <option value="2">≤ 2 (консервативно)</option>
+                <option value="3" selected>≤ 3 (умеренно)</option>
+                <option value="4">≤ 4 (агрессивно)</option>
+              </select>
+            </div>
+            <button id="alloc-compute" class="px-4 py-2 bg-accent text-white rounded-md text-sm font-medium hover:bg-accent-muted">Рассчитать</button>
+          </div>
+          <div id="alloc-result" class="hidden"></div>
+        </div>
+      </details>
+    </section>
+
     <!-- My positions (hidden until user adds first position) -->
     <section id="positions" class="hidden mb-6">
       <div class="flex items-end justify-between mb-2">

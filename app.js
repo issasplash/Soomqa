@@ -1147,8 +1147,89 @@ function renderRecommendation(row, stats, amount, breakDays) {
       <div class="rec-headline">${v.emoji} <b>${v.label}</b> <span class="rec-score">${rec.score >= 0 ? "+" : ""}${rec.score}</span></div>
       ${prosHtml}
       ${consHtml}
+      ${renderExecutionGuide(row, amount)}
     </div>
   `;
+}
+
+// Step-by-step "how to actually open this position" guide per category.
+// Surfaces the practical translation between "what the table says" and
+// "what you click in real life". Specific to the category, parameterised
+// by amount and (for spreads) leg sources/symbols.
+function renderExecutionGuide(row, amount) {
+  const steps = guideStepsFor(row, amount);
+  if (!steps || steps.length === 0) return "";
+  const html = steps.map((s, i) => `<li>${s}</li>`).join("");
+  return `
+    <details class="exec-guide">
+      <summary>📋 Как открыть позицию — шаги</summary>
+      <ol class="exec-steps">${html}</ol>
+    </details>
+  `;
+}
+
+function guideStepsFor(row, amount) {
+  const amt = Math.max(50, Math.round(amount));
+  if (row.category === "stable-lending") {
+    return [
+      `Купи USDC/USDT/USDe на $${amt} на любой бирже (Bybit, OKX, BingX).`,
+      `Withdraw на свой Web3-кошелёк (MetaMask, Rabby) — сеть Ethereum / Base / Arbitrum по адресу контракта пула.`,
+      `Зайди на <strong>${escapeHtml(row.source)}</strong> (например app.aave.com / app.morpho.org).`,
+      `Connect Wallet → выбери нужный chain.`,
+      `Supply $${amt} в пул <strong>${escapeHtml(row.market)}</strong> → проценты начисляются автоматически.`,
+      `💡 Снимать можно когда угодно. Газ на L2 (Base/Arbitrum) ~$0.10-2, на mainnet — $5-20.`,
+    ];
+  }
+  if (row.category === "fixed-yield") {
+    return [
+      `Купи USDC/USDT/ETH на $${amt} на бирже.`,
+      `Withdraw в свой Web3-кошелёк.`,
+      `Зайди на <strong>app.pendle.finance</strong> (или Boros если строка от Pendle Boros).`,
+      `Markets → найди этот PT (<strong>${escapeHtml(row.market)}</strong>) → нажми "Buy PT".`,
+      `Покупка фиксирует доходность <b>${row.apr.toFixed(2)}%</b> до даты maturity.`,
+      `💡 До maturity early exit возможен но с slippage. Лучше держать до даты — тогда нет fees на выход.`,
+    ];
+  }
+  if (row.category === "delta-neutral") {
+    return [
+      `Купи USDT/USDC на $${amt} на бирже.`,
+      `Withdraw в Web3-кошелёк.`,
+      `Зайди на <strong>app.ethena.fi</strong>.`,
+      `Mint USDe → переключи на sUSDe (stake) для получения yield.`,
+      `💡 sUSDe растёт стоимостью (не rebase). Через 7 дней cooldown на anstake → USDe → withdraw на биржу.`,
+    ];
+  }
+  if (row.category === "restaking") {
+    return [
+      `Купи ETH на $${amt} на бирже.`,
+      `Withdraw в свой Web3-кошелёк.`,
+      `Зайди на сайт LRT (ether.fi / renzo / kelp / puffer) указанный в Source.`,
+      `Stake ETH → получаешь LRT token (eETH / ezETH / rsETH / pufETH).`,
+      `💡 Holding токена = автоматически yield + airdrop points. Можно использовать как collateral на Aave для leverage.`,
+    ];
+  }
+  if (row.category === "funding-rate") {
+    const halfAmt = Math.round(amt / 2);
+    return [
+      `Купи спот <strong>${escapeHtml(row.market)}</strong> на <strong>${escapeHtml(row.source)}</strong> на $${halfAmt}.`,
+      `На той же бирже открой <b>SHORT perpetual</b> на $${halfAmt} (тот же символ).`,
+      `Каждый funding cycle (8h на Bybit/MEXC/Gate/HTX, 1h на HL) получаешь funding rate × position size.`,
+      `Если хочешь leverage — открыть с margin (например 2× = $${Math.round(halfAmt / 2)} margin → $${halfAmt} position). Внимание: liquidation risk.`,
+      `💡 Это delta-neutral — price не влияет. Закрывай обе ноги одновременно когда funding падает.`,
+    ];
+  }
+  if (row.category === "cross-exchange-spread" && row.longLeg && row.shortLeg) {
+    const half = Math.round(amt / 2);
+    return [
+      `Раздели $${amt} пополам — по $${half} на две биржи.`,
+      `На <strong>${escapeHtml(row.longLeg.source)}</strong> купи спот <strong>${escapeHtml(row.longLeg.market)}</strong> на $${half}.`,
+      `На <strong>${escapeHtml(row.shortLeg.source)}</strong> открой <b>SHORT perpetual</b> <strong>${escapeHtml(row.shortLeg.market)}</strong> на $${half}.`,
+      `Каждые 8h: long-биржа выплачивает (или забирает) ${row.longLeg.apr.toFixed(2)}% APR funding, short-биржа выплачивает ${row.shortLeg.apr.toFixed(2)}% APR.`,
+      `Чистый spread тебе: <b>+${row.apr.toFixed(2)}% APR</b> delta-neutral.`,
+      `💡 Закрывай обе ноги одновременно когда spread схлопывается (≤5% APR). Не оставляй одну ногу открытой — это directional risk.`,
+    ];
+  }
+  return null;
 }
 
 // ─── Historical APR / yield (loaded on demand when a row is expanded) ────────
@@ -2476,6 +2557,160 @@ function applyPreset(name) {
 document.querySelectorAll(".preset-btn[data-preset]").forEach(btn => {
   btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
 });
+
+// ─── Capital allocator ────────────────────────────────────────────────────────
+//
+// Naive greedy + per-category cap. Sorts liquid rows by APR descending,
+// allocates greedy from the top, but never lets a single category exceed its
+// cap of the total. Designed to land at 4-7 positions with the top APR
+// available, while still forcing diversification (no putting 100% into
+// the single hottest Pendle PT).
+
+const CATEGORY_ALLOC_CAP = {
+  "stable-lending":        0.50,  // up to 50% — это safe layer
+  "fixed-yield":           0.40,
+  "delta-neutral":         0.25,  // Ethena yield variable
+  "restaking":             0.20,
+  "cross-exchange-spread": 0.20,  // requires capital on 2 venues
+  "funding-rate":          0.15,  // single-venue, sensitive to spike decay
+  "leveraged-stable":      0.10,
+};
+const PER_POSITION_MAX_PCT = 0.30;  // никогда больше 30% в одну строку
+const MIN_TICKET_USD = 50;          // под $50 не имеет смысла открывать
+
+function computeAllocation(totalUsd, maxRisk) {
+  if (totalUsd < MIN_TICKET_USD * 2) {
+    return { allocations: [], unallocated: totalUsd, note: `Минимум $${MIN_TICKET_USD * 2} для разумной диверсификации` };
+  }
+
+  // Universe: liquid, non-suspect, risk ≤ user's tolerance, excluding the
+  // synthetic Cross-exchange rows (we keep them but with the spread cap).
+  const candidates = state.rows
+    .filter(r => r.liquid && !r.suspect && riskScoreFor(r) <= maxRisk && r.apr > 0)
+    .sort((a, b) => b.apr - a.apr);
+
+  const categoryTotals = new Map();
+  const allocations = [];
+  let remaining = totalUsd;
+  const perPositionMax = totalUsd * PER_POSITION_MAX_PCT;
+
+  for (const row of candidates) {
+    if (remaining < MIN_TICKET_USD) break;
+    const cap = (CATEGORY_ALLOC_CAP[row.category] ?? 0.10) * totalUsd;
+    const inCat = categoryTotals.get(row.category) ?? 0;
+    const room = cap - inCat;
+    if (room < MIN_TICKET_USD) continue;
+    const amount = Math.min(remaining, perPositionMax, room);
+    if (amount < MIN_TICKET_USD) continue;
+    allocations.push({ row, amount: Math.round(amount) });
+    categoryTotals.set(row.category, inCat + amount);
+    remaining -= amount;
+    if (allocations.length >= 7) break;
+  }
+
+  // Estimate annual income from the proposed allocation
+  let annualIncome = 0;
+  for (const a of allocations) {
+    annualIncome += a.amount * (a.row.apr / 100);
+  }
+
+  return {
+    allocations,
+    unallocated: Math.max(0, Math.round(remaining)),
+    annualIncome,
+    monthlyIncome: annualIncome / 12,
+  };
+}
+
+function renderAllocation(plan) {
+  const root = document.getElementById("alloc-result");
+  if (!root) return;
+  if (plan.note) {
+    root.innerHTML = `<p class="text-amber-400 text-sm">${escapeHtml(plan.note)}</p>`;
+    root.classList.remove("hidden");
+    return;
+  }
+  if (plan.allocations.length === 0) {
+    root.innerHTML = `<p class="text-zinc-500 text-sm">Не нашёл подходящих стратегий под заданный риск. Попробуй увеличить риск или подожди следующего обновления.</p>`;
+    root.classList.remove("hidden");
+    return;
+  }
+
+  const totalAllocated = plan.allocations.reduce((s, a) => s + a.amount, 0);
+  const rows = plan.allocations.map(a => {
+    const cat = CATEGORY_LABELS[a.row.category] ?? { label: a.row.category, badge: "" };
+    const risk = riskScoreFor(a.row);
+    const monthly = a.amount * (a.row.apr / 100) / 12;
+    const pctOfTotal = ((a.amount / (totalAllocated + plan.unallocated)) * 100).toFixed(0);
+    return `
+      <tr class="border-b border-border/30">
+        <td class="px-2 py-2 font-mono text-xs text-zinc-200">$${a.amount}</td>
+        <td class="px-2 py-2 text-zinc-400 text-xs">${pctOfTotal}%</td>
+        <td class="px-2 py-2 text-zinc-100 text-xs">${escapeHtml(a.row.source)}<br><span class="font-mono text-zinc-500">${escapeHtml(a.row.market)}</span></td>
+        <td class="px-2 py-2"><span class="badge ${cat.badge}">${cat.label}</span></td>
+        <td class="px-2 py-2 text-right font-mono text-xs ${aprColourClass(a.row.apr)}">${a.row.apr.toFixed(2)}%</td>
+        <td class="px-2 py-2"><span class="risk-dot ${riskColourClass(risk)}"></span></td>
+        <td class="px-2 py-2 text-right font-mono text-xs pos">+$${monthly.toFixed(2)}/мес</td>
+      </tr>
+    `;
+  }).join("");
+
+  root.innerHTML = `
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead class="text-[10px] uppercase tracking-wide text-zinc-500">
+          <tr>
+            <th class="text-left px-2 py-1">Сумма</th>
+            <th class="text-left px-2 py-1">%</th>
+            <th class="text-left px-2 py-1">Куда</th>
+            <th class="text-left px-2 py-1">Категория</th>
+            <th class="text-right px-2 py-1">APR</th>
+            <th class="text-left px-2 py-1">Риск</th>
+            <th class="text-right px-2 py-1">Доход/мес</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="alloc-summary">
+      <span>Распределено: <b>$${totalAllocated}</b></span>
+      <span>Остаток: <b>$${plan.unallocated}</b></span>
+      <span>Ожидаемый доход: <b class="text-emerald-400">+$${plan.monthlyIncome.toFixed(2)}/мес</b> · <span class="text-zinc-400">+$${plan.annualIncome.toFixed(2)}/год</span></span>
+    </div>
+    <p class="text-[11px] text-zinc-500 mt-2">⚠ Оценка линейная (без compound). APR могут меняться. Это suggested allocation — не инвестрекомендация.</p>
+  `;
+  root.classList.remove("hidden");
+}
+
+// Wire allocator inputs
+const allocTotal = document.getElementById("alloc-total");
+const allocRisk = document.getElementById("alloc-risk");
+const allocCompute = document.getElementById("alloc-compute");
+if (allocCompute && allocTotal && allocRisk) {
+  // Restore last values from localStorage
+  try {
+    const saved = JSON.parse(localStorage.getItem("soomqa.allocator.v1") || "{}");
+    if (saved.total) allocTotal.value = saved.total;
+    if (saved.risk) allocRisk.value = saved.risk;
+  } catch {}
+
+  function runAllocator() {
+    const total = Number(allocTotal.value) || 0;
+    const risk = Number(allocRisk.value) || 3;
+    try {
+      localStorage.setItem("soomqa.allocator.v1", JSON.stringify({ total, risk }));
+    } catch {}
+    if (state.rows.length === 0) {
+      document.getElementById("alloc-result").innerHTML = `<p class="text-zinc-500 text-sm">Подожди первой загрузки данных…</p>`;
+      document.getElementById("alloc-result").classList.remove("hidden");
+      return;
+    }
+    const plan = computeAllocation(total, risk);
+    renderAllocation(plan);
+  }
+  allocCompute.addEventListener("click", runAllocator);
+  allocTotal.addEventListener("keydown", e => { if (e.key === "Enter") runAllocator(); });
+}
 
 // ─── Side-by-side compare panel ───────────────────────────────────────────────
 

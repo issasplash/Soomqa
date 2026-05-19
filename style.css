@@ -788,6 +788,62 @@ tbody tr.data-row.expanded {
   line-height: 1.4;
 }
 
+/* Capital allocator */
+.alloc-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: #d4d4d8;
+}
+.alloc-summary b { color: #fff; }
+
+/* Step-by-step execution guide inside recommendation block */
+.exec-guide {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.exec-guide summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #c4b9ff;
+  font-weight: 500;
+  user-select: none;
+  list-style: none;
+}
+.exec-guide summary::before {
+  content: "▶ ";
+  font-size: 9px;
+  margin-right: 4px;
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+.exec-guide[open] summary::before {
+  content: "▼ ";
+}
+.exec-guide summary::-webkit-details-marker { display: none; }
+.exec-guide summary:hover { color: #fff; }
+.exec-steps {
+  margin-top: 8px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: #d4d4d8;
+  line-height: 1.5;
+}
+.exec-steps li { padding-left: 4px; }
+.exec-steps strong { color: #fff; }
+.exec-steps li:last-child {
+  color: #fbbf24;
+  margin-top: 2px;
+  font-style: italic;
+}
+
 /* Disabled button state — keeps loading state visually distinct */
 button:disabled {
   opacity: 0.6;
