@@ -5,11 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0a0a0f" />
   <title>Soomqa — Монитор доходностей</title>
+  <meta name="description" content="Crypto yield monitor — funding rates 7 бирж, DeFi APY, cross-exchange спреды, калькулятор break-even, Telegram-алерты." />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Soomqa" />
+
+  <!-- Open Graph for nice previews when sharing URL in Telegram / Discord / X -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Soomqa — Монитор крипто-доходностей" />
+  <meta property="og:description" content="Funding rates 7 бирж + DeFi APY + cross-exchange спреды в одной таблице. Калькулятор break-even с учётом fees. Telegram-алерты." />
+  <meta property="og:image" content="https://issasplash.github.io/Soomqa/icons/icon-512.png" />
+  <meta property="og:url" content="https://issasplash.github.io/Soomqa/" />
+  <meta property="og:locale" content="ru_RU" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Soomqa — Монитор крипто-доходностей" />
+  <meta name="twitter:description" content="Все funding rates и DeFi yields в одной таблице. Калькулятор + рекомендации + Telegram-алерты." />
+  <meta name="twitter:image" content="https://issasplash.github.io/Soomqa/icons/icon-512.png" />
+
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -130,6 +145,17 @@
             <span>★ избранные</span>
           </label>
         </div>
+      </div>
+
+      <!-- Quick filter presets: one-click setups for common workflows -->
+      <div class="preset-bar">
+        <span class="preset-label">Быстро:</span>
+        <button class="preset-btn" data-preset="safe">🟢 Безопасные</button>
+        <button class="preset-btn" data-preset="stables">🏦 Стейблы 5%+</button>
+        <button class="preset-btn" data-preset="pendle">📜 Pendle PT 15%+</button>
+        <button class="preset-btn" data-preset="spreads">🔀 Cross-spread</button>
+        <button class="preset-btn" data-preset="spikes">⚡ Funding ≥50%</button>
+        <button class="preset-btn" data-preset="reset">↺ Сброс</button>
       </div>
     </section>
 

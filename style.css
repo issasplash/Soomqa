@@ -611,6 +611,62 @@ tbody tr.data-row.expanded {
 }
 .show-all-btn:hover { background: rgba(124, 92, 255, 0.08); color: #fff; }
 
+/* Quick filter preset buttons */
+.preset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #252533;
+  align-items: center;
+}
+.preset-label {
+  font-size: 10px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.preset-btn {
+  background: #13131a;
+  border: 1px solid #252533;
+  color: #d4d4d8;
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+}
+.preset-btn:hover {
+  border-color: #7c5cff;
+  background: rgba(124, 92, 255, 0.10);
+  color: #fff;
+}
+.preset-btn:active { transform: translateY(1px); }
+
+/* Risk score dot in the APR cell */
+.apr-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.risk-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.risk-1 { background: #4ade80; }    /* зелёный — низкий риск */
+.risk-2 { background: #a3e635; }    /* лайм */
+.risk-3 { background: #fbbf24; }    /* жёлтый — средний */
+.risk-4 { background: #fb923c; }    /* оранжевый */
+.risk-5 { background: #f87171; }    /* красный — высокий */
+
 /* Disabled button state — keeps loading state visually distinct */
 button:disabled {
   opacity: 0.6;

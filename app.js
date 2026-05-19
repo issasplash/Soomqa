@@ -67,6 +67,47 @@ const CATEGORY_DESCRIPTIONS = {
 // Default rows shown per group before user clicks "show all".
 const GROUP_DEFAULT_LIMIT = 10;
 
+// ─── Risk score ───────────────────────────────────────────────────────────────
+//
+// Composite 1–5 score per row. 1 = "класть и забыть", 5 = "знай что делаешь".
+// Designed to be readable at a glance — colour-coded dot next to the APR.
+//
+// Inputs are category default, liquidity flag, APR magnitude, and (optionally)
+// spike-vs-average if we have history data cached.
+
+const CATEGORY_BASE_RISK = {
+  "stable-lending": 1,
+  "fixed-yield":    2,
+  "delta-neutral":  3,
+  "restaking":      3,
+  "leveraged-stable": 4,
+  "funding-rate":   4,
+  "cross-exchange-spread": 4,
+};
+
+function riskScoreFor(row) {
+  let score = CATEGORY_BASE_RISK[row.category] ?? 3;
+  if (row.liquid === false) score += 1;
+  if (row.nonCrypto) score += 1;
+  if (Math.abs(row.apr) > 100) score += 1;
+  else if (Math.abs(row.apr) > 50) score += 0.5;
+  // Spike detection from cached history (if available). historyCache is
+  // defined further down the file; guard against TDZ.
+  try {
+    const hist = historyCache.get(historyCacheKey(row, 7));
+    if (hist && hist.points && hist.points.length > 5) {
+      const sum = hist.points.reduce((s, p) => s + p.value, 0);
+      const avg = sum / hist.points.length;
+      if (avg !== 0 && Math.abs(row.apr / avg) > 1.5) score += 0.5;
+    }
+  } catch { /* historyCache not yet initialised */ }
+  return Math.max(1, Math.min(5, Math.round(score)));
+}
+
+function riskColourClass(score) {
+  return ["risk-1", "risk-2", "risk-3", "risk-4", "risk-5"][score - 1] ?? "risk-3";
+}
+
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 
 async function getJson(url, init = {}, timeoutMs = 15000) {
@@ -1871,12 +1912,16 @@ function renderRow(r, i) {
   const star = isWatched(r)
     ? `<button class="star-btn star-on" data-watch-row="${i}" aria-label="Убрать из избранного">★</button>`
     : `<button class="star-btn" data-watch-row="${i}" aria-label="В избранное">☆</button>`;
+  const risk = riskScoreFor(r);
+  const riskCls = riskColourClass(risk);
+  const riskTitle = ["низкий","умеренный","средний","повышенный","высокий"][risk-1];
+  const riskDot = `<span class="risk-dot ${riskCls}" title="Риск: ${riskTitle} (${risk}/5)"></span>`;
   return `
     <tr class="data-row ${rowOpacity} ${expanded ? "expanded" : ""}" data-row-index="${i}">
       <td class="px-3 py-2 text-zinc-300">${star}${escapeHtml(r.source)}</td>
       <td class="px-3 py-2 font-mono text-xs text-zinc-100">${escapeHtml(r.market)}${r.quote ? `<span class="text-zinc-500">/${escapeHtml(r.quote)}</span>` : ""}${marketBadge}</td>
       <td class="px-3 py-2 hidden sm:table-cell"><span class="badge ${cat.badge}">${cat.label}</span></td>
-      <td class="px-3 py-2 text-right font-mono ${colour}">${arrow}${fmtApr(r.apr)}</td>
+      <td class="px-3 py-2 text-right font-mono ${colour}"><span class="apr-cell">${riskDot}${arrow}${fmtApr(r.apr)}</span></td>
       <td class="px-3 py-2 hidden md:table-cell text-zinc-400 text-xs">${r.fixed ? "фикс" : "плав"}</td>
       <td class="px-3 py-2 hidden lg:table-cell text-zinc-500 text-xs">${escapeHtml(r.note ?? "")}</td>
     </tr>
@@ -2288,6 +2333,41 @@ els.watchlistOnly.addEventListener("change", e => {
   state.filters.watchlistOnly = e.target.checked;
   saveFilters();
   render();
+});
+
+// Quick filter presets — one-click setups for common workflows. Each preset
+// overwrites the filter state wholesale; user can tweak from there.
+const PRESETS = {
+  // "Безопасные" — стейблы + фикс. доходность с разумным APR и достаточной
+  // ликвидностью. Технически filter показывает category=stable-lending здесь;
+  // через group-view пользователь увидит fixed-yield рядом, потому что
+  // ликвидность включена.
+  safe:    { search: "", category: "stable-lending", minApr: 4,  maxApr: 25,  liquidOnly: true,  watchlistOnly: false, sort: "apr-desc" },
+  stables: { search: "", category: "stable-lending", minApr: 5,  maxApr: null, liquidOnly: true, watchlistOnly: false, sort: "apr-desc" },
+  pendle:  { search: "", category: "fixed-yield",    minApr: 15, maxApr: null, liquidOnly: true, watchlistOnly: false, sort: "apr-desc" },
+  spreads: { search: "", category: "cross-exchange-spread", minApr: 10, maxApr: null, liquidOnly: true, watchlistOnly: false, sort: "apr-desc" },
+  spikes:  { search: "", category: "funding-rate",   minApr: 50, maxApr: null, liquidOnly: true, watchlistOnly: false, sort: "apr-desc" },
+  reset:   { search: "", category: "",               minApr: null, maxApr: null, liquidOnly: false, watchlistOnly: false, sort: "apr-desc" },
+};
+
+function applyPreset(name) {
+  const preset = PRESETS[name];
+  if (!preset) return;
+  Object.assign(state.filters, preset);
+  // Reflect into the input controls
+  els.search.value = state.filters.search ?? "";
+  els.category.value = state.filters.category ?? "";
+  els.sort.value = state.filters.sort ?? "apr-desc";
+  els.minApr.value = state.filters.minApr ?? "";
+  els.maxApr.value = state.filters.maxApr ?? "";
+  els.liquidOnly.checked = !!state.filters.liquidOnly;
+  els.watchlistOnly.checked = !!state.filters.watchlistOnly;
+  saveFilters();
+  render();
+}
+
+document.querySelectorAll(".preset-btn[data-preset]").forEach(btn => {
+  btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
 });
 els.category.addEventListener("change", e => {
   state.filters.category = e.target.value;
