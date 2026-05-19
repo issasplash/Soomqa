@@ -38,6 +38,20 @@ async function getJson(url, init = {}, timeoutMs = 15000) {
   }
 }
 
+// Some exchanges (MEXC, Gate.io, HTX) don't send the Access-Control-Allow-Origin
+// header on their public endpoints, so the browser blocks the fetch. corsproxy.io
+// is a public free CORS proxy — we use it ONLY as a fallback (direct first) and
+// only for endpoints we already know are read-only public data. Never used for
+// signed/authenticated requests.
+async function getJsonViaCorsFallback(url, init = {}, timeoutMs = 15000) {
+  try {
+    return await getJson(url, init, timeoutMs);
+  } catch (err) {
+    const proxied = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+    return await getJson(proxied, init, timeoutMs);
+  }
+}
+
 async function postJson(url, body, timeoutMs = 15000) {
   return getJson(url, {
     method: "POST",
@@ -249,8 +263,8 @@ async function fetchHyperliquid() {
 async function fetchMexcFunding() {
   try {
     const [fundings, tickers] = await Promise.all([
-      getJson("https://contract.mexc.com/api/v1/contract/funding_rate/all"),
-      getJson("https://contract.mexc.com/api/v1/contract/ticker"),
+      getJsonViaCorsFallback("https://contract.mexc.com/api/v1/contract/funding_rate/all"),
+      getJsonViaCorsFallback("https://contract.mexc.com/api/v1/contract/ticker"),
     ]);
     const volumeBy = new Map();
     for (const t of (tickers?.data ?? [])) {
@@ -281,7 +295,7 @@ async function fetchMexcFunding() {
 // contracts with funding_rate, mark/index price, and 24h turnover.
 async function fetchGateFunding() {
   try {
-    const data = await getJson("https://api.gateio.ws/api/v4/futures/usdt/contracts");
+    const data = await getJsonViaCorsFallback("https://api.gateio.ws/api/v4/futures/usdt/contracts");
     const rows = (Array.isArray(data) ? data : []).map(r => {
       // Some Gate contracts use 1h funding interval, most are 8h. Derive
       // the period from `funding_interval` (seconds) so APR is correct.
@@ -312,7 +326,7 @@ async function fetchGateFunding() {
 // HTX (formerly Huobi) linear USDT swaps — public batch endpoint.
 async function fetchHtxFunding() {
   try {
-    const data = await getJson("https://api.hbdm.com/linear-swap-api/v1/swap_batch_funding_rate");
+    const data = await getJsonViaCorsFallback("https://api.hbdm.com/linear-swap-api/v1/swap_batch_funding_rate");
     const rows = (data?.data ?? []).map(r => {
       const apr = Number(r.funding_rate ?? 0) * APR_8H * 100;
       const market = r.contract_code.replace(/-USDT$/, "");
@@ -1537,6 +1551,37 @@ function renderCalculator(row) {
     ? renderBaselineComparison(row, baseline, amount, projections[bestIdx >= 0 ? bestIdx : projections.length - 1])
     : "";
 
+  // For cross-exchange spreads, surface the two legs explicitly — the user
+  // needs to know WHERE to long and WHERE to short. The "note" column shows
+  // the same info but it's hidden on mobile breakpoints.
+  const hedgeBlock = row.category === "cross-exchange-spread" && row.longLeg && row.shortLeg
+    ? `
+      <div class="calc-hedge">
+        <div class="calc-hedge-title">🔀 Как открывать хедж</div>
+        <div class="calc-hedge-row calc-hedge-long">
+          <span class="calc-hedge-side">📈 LONG</span>
+          <div class="calc-hedge-detail">
+            <div class="calc-hedge-venue">${escapeHtml(row.longLeg.source)}</div>
+            <div class="calc-hedge-market">${escapeHtml(row.longLeg.market)}${row.longLeg.quote ? "/" + escapeHtml(row.longLeg.quote) : ""}</div>
+          </div>
+          <span class="calc-hedge-rate ${row.longLeg.apr < 0 ? "pos" : ""}">${row.longLeg.apr.toFixed(2)}%</span>
+        </div>
+        <div class="calc-hedge-row calc-hedge-short">
+          <span class="calc-hedge-side">📉 SHORT</span>
+          <div class="calc-hedge-detail">
+            <div class="calc-hedge-venue">${escapeHtml(row.shortLeg.source)}</div>
+            <div class="calc-hedge-market">${escapeHtml(row.shortLeg.market)}${row.shortLeg.quote ? "/" + escapeHtml(row.shortLeg.quote) : ""}</div>
+          </div>
+          <span class="calc-hedge-rate pos">${row.shortLeg.apr.toFixed(2)}%</span>
+        </div>
+        <div class="calc-hedge-net">
+          Net spread: <b>+${row.apr.toFixed(2)}% APR</b>
+          <span class="calc-hedge-hint">Капитал делится пополам: $${(amount/2).toFixed(0)} на каждую биржу</span>
+        </div>
+      </div>
+    `
+    : "";
+
   return `
     <div class="calc-panel" data-calc-for="${row._idx}">
       <div class="calc-input-row">
@@ -1550,6 +1595,7 @@ function renderCalculator(row) {
         </div>
         <button class="position-add-btn" data-add-position="${row._idx}" type="button">+ В позиции</button>
       </div>
+      ${hedgeBlock}
       <div class="calc-table-wrap">
         <table class="calc-table">
           <thead>

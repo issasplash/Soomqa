@@ -465,6 +465,83 @@ tbody tr.data-row.expanded {
 .pos-apr-down { color: #f87171; margin-left: 6px; font-size: 11px; }
 .pos-apr-flat { color: #8a92a6; margin-left: 6px; font-size: 11px; }
 
+/* Cross-exchange hedge breakdown */
+.calc-hedge {
+  background: rgba(232, 121, 249, 0.06);
+  border: 1px solid rgba(232, 121, 249, 0.25);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.calc-hedge-title {
+  font-size: 11px;
+  color: #f5d0fe;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+.calc-hedge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+}
+.calc-hedge-long  { border-left: 3px solid #4ade80; }
+.calc-hedge-short { border-left: 3px solid #f87171; }
+.calc-hedge-side {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  min-width: 70px;
+  font-family: ui-monospace, monospace;
+}
+.calc-hedge-long .calc-hedge-side  { color: #4ade80; }
+.calc-hedge-short .calc-hedge-side { color: #f87171; }
+.calc-hedge-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.calc-hedge-venue {
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+}
+.calc-hedge-market {
+  font-size: 11px;
+  color: #8a92a6;
+  font-family: ui-monospace, monospace;
+}
+.calc-hedge-rate {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #d4d4d8;
+}
+.calc-hedge-rate.pos { color: #4ade80; }
+.calc-hedge-net {
+  font-size: 12px;
+  color: #d4d4d8;
+  font-family: ui-monospace, monospace;
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+}
+.calc-hedge-net b { color: #4ade80; font-size: 14px; }
+.calc-hedge-hint {
+  color: #8a92a6;
+  font-size: 11px;
+  font-style: italic;
+}
+
 /* Disabled button state — keeps loading state visually distinct */
 button:disabled {
   opacity: 0.6;
