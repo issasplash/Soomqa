@@ -2752,7 +2752,7 @@ const PER_POSITION_MAX_PCT = 0.30;  // single row never > 30%
 const MIN_TICKET_USD = 50;
 const MAX_POSITIONS = 7;
 
-function computeAllocation(totalUsd, maxRisk, mode = "diversified") {
+function computeAllocation(totalUsd, maxRisk, mode = "concentrated") {
   if (totalUsd < MIN_TICKET_USD * 2) {
     return { allocations: [], unallocated: totalUsd, note: `Минимум $${MIN_TICKET_USD * 2} для разумной диверсификации` };
   }
@@ -2958,7 +2958,7 @@ if (allocCompute && allocTotal && allocRisk) {
   function runAllocator() {
     const total = Number(allocTotal.value) || 0;
     const risk = Number(allocRisk.value) || 3;
-    const mode = allocMode?.value || "diversified";
+    const mode = allocMode?.value || "concentrated";
     try {
       localStorage.setItem("soomqa.allocator.v1", JSON.stringify({ total, risk, mode }));
     } catch {}
