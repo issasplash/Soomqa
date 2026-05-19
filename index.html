@@ -139,26 +139,10 @@
       <ul id="errors-list" class="text-xs text-amber-300/80 list-disc list-inside"></ul>
     </section>
 
-    <!-- Table -->
-    <section class="bg-bg-card border border-border rounded-lg overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-bg-elev text-zinc-400 text-[11px] uppercase tracking-wide">
-            <tr>
-              <th class="text-left px-3 py-2 font-medium">Источник</th>
-              <th class="text-left px-3 py-2 font-medium">Рынок</th>
-              <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">Категория</th>
-              <th class="text-right px-3 py-2 font-medium">APR</th>
-              <th class="text-left px-3 py-2 font-medium hidden md:table-cell">Тип</th>
-              <th class="text-left px-3 py-2 font-medium hidden lg:table-cell">Заметка</th>
-            </tr>
-          </thead>
-          <tbody id="rows" class="divide-y divide-border/50">
-            <tr><td colspan="6" class="px-3 py-8 text-center text-zinc-500" id="loading-row">Опрашиваем 4 источника…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <!-- Table / Groups container -->
+    <div id="rows" class="flex flex-col gap-4">
+      <div class="bg-bg-card border border-border rounded-lg px-3 py-8 text-center text-zinc-500" id="loading-row">Опрашиваем 7 источников…</div>
+    </div>
 
     <footer class="mt-6 text-xs text-zinc-500 text-center">
       <p>Только публичные данные: Binance, Bybit, Hyperliquid, DefiLlama. Без аккаунтов и API-ключей.</p>

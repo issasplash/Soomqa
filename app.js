@@ -24,6 +24,49 @@ const CATEGORY_LABELS = {
   "cross-exchange-spread": { label: "Cross-spread", badge: "badge-spread" },
 };
 
+// One-paragraph description of each strategy so the user knows what kind of
+// trade each group represents — what they're committing to, what the risks are.
+const CATEGORY_DESCRIPTIONS = {
+  "stable-lending": {
+    emoji: "🏦",
+    title: "Лендинг стейблов",
+    desc: "Положил USDC/USDT/DAI в DeFi-пул → получаешь yield. Мгновенный вывод, самая безопасная стратегия.",
+  },
+  "fixed-yield": {
+    emoji: "📜",
+    title: "Фикс. доходность (Pendle PT)",
+    desc: "Покупаешь PT-токен с дисконтом → на maturity он стоит полную цену = фиксированный yield. Деньги залочены до даты.",
+  },
+  "delta-neutral": {
+    emoji: "⚖️",
+    title: "Δ-нейтрал (Ethena)",
+    desc: "Готовая funding-arb стратегия в одном токене. Yield variable, зависит от рынка perp.",
+  },
+  "restaking": {
+    emoji: "🧱",
+    title: "Рестейкинг (LRT)",
+    desc: "Стейкаешь ETH → базовый yield + AVS rewards + airdrop points. Долгосрочно, риск slashing.",
+  },
+  "cross-exchange-spread": {
+    emoji: "🔀",
+    title: "Cross-exchange спред",
+    desc: "Long на одной бирже + short на другой = ловишь разницу funding rate. Требует капитал на 2 биржах одновременно.",
+  },
+  "funding-rate": {
+    emoji: "🔄",
+    title: "Funding rate (одна биржа)",
+    desc: "Активный трейдинг funding rate. На каждой бирже отдельно. Спайки длятся часами — требует мониторинг.",
+  },
+  "leveraged-stable": {
+    emoji: "🔁",
+    title: "Leveraged stables",
+    desc: "Рекурсивные займы для усиления доходности. Риск ликвидации при депеге.",
+  },
+};
+
+// Default rows shown per group before user clicks "show all".
+const GROUP_DEFAULT_LIMIT = 10;
+
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 
 async function getJson(url, init = {}, timeoutMs = 15000) {
@@ -496,6 +539,11 @@ const state = {
   expandedRowIndex: null,
   // APR history: rowKey → last known APR. Diffed each refresh to show ↑/↓ arrows.
   previousApr: new Map(),
+  // Group view state: which category headers are collapsed, which had "show
+  // all" clicked. Both persist across renders so the user doesn't lose context
+  // when refreshData repaints.
+  collapsedGroups: new Set(),
+  showAllGroups: new Set(),
 };
 
 // ─── Positions (Phase 3: track what you actually deposited) ──────────────────
@@ -1804,6 +1852,189 @@ function attachCalcInputListener(input) {
   input.addEventListener("click", e => e.stopPropagation());
 }
 
+// ─── Row + group renderers (separated so flat view and group view share code) ─
+
+function renderRow(r, i) {
+  const cat = CATEGORY_LABELS[r.category] ?? { label: r.category, badge: "" };
+  const colour = aprColourClass(r.apr);
+  const rowOpacity = r.liquid === false ? "opacity-70" : "";
+  const marketBadge = r.liquid === false
+    ? `<span class="ml-1 text-[10px] text-amber-400/70" title="Тонкий рынок — APR быстро меняется">●</span>`
+    : "";
+  const expanded = state.expandedRowIndex === i;
+  const change = aprChange(r);
+  const arrow = change.direction === "up"
+    ? `<span class="apr-up" title="+${change.delta.toFixed(2)}% с прошлого обновления">▲</span>`
+    : change.direction === "down"
+      ? `<span class="apr-down" title="${change.delta.toFixed(2)}% с прошлого обновления">▼</span>`
+      : "";
+  const star = isWatched(r)
+    ? `<button class="star-btn star-on" data-watch-row="${i}" aria-label="Убрать из избранного">★</button>`
+    : `<button class="star-btn" data-watch-row="${i}" aria-label="В избранное">☆</button>`;
+  return `
+    <tr class="data-row ${rowOpacity} ${expanded ? "expanded" : ""}" data-row-index="${i}">
+      <td class="px-3 py-2 text-zinc-300">${star}${escapeHtml(r.source)}</td>
+      <td class="px-3 py-2 font-mono text-xs text-zinc-100">${escapeHtml(r.market)}${r.quote ? `<span class="text-zinc-500">/${escapeHtml(r.quote)}</span>` : ""}${marketBadge}</td>
+      <td class="px-3 py-2 hidden sm:table-cell"><span class="badge ${cat.badge}">${cat.label}</span></td>
+      <td class="px-3 py-2 text-right font-mono ${colour}">${arrow}${fmtApr(r.apr)}</td>
+      <td class="px-3 py-2 hidden md:table-cell text-zinc-400 text-xs">${r.fixed ? "фикс" : "плав"}</td>
+      <td class="px-3 py-2 hidden lg:table-cell text-zinc-500 text-xs">${escapeHtml(r.note ?? "")}</td>
+    </tr>
+    ${expanded ? `<tr class="calc-row"><td colspan="6">${renderCalculator(r)}</td></tr>` : ""}
+  `;
+}
+
+const TABLE_HEAD_HTML = `
+  <thead class="bg-bg-elev text-zinc-400 text-[11px] uppercase tracking-wide">
+    <tr>
+      <th class="text-left px-3 py-2 font-medium">Источник</th>
+      <th class="text-left px-3 py-2 font-medium">Рынок</th>
+      <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">Категория</th>
+      <th class="text-right px-3 py-2 font-medium">APR</th>
+      <th class="text-left px-3 py-2 font-medium hidden md:table-cell">Тип</th>
+      <th class="text-left px-3 py-2 font-medium hidden lg:table-cell">Заметка</th>
+    </tr>
+  </thead>
+`;
+
+function renderFlatTable(filtered) {
+  const visible = filtered.slice(0, 500);
+  visible.forEach((r, i) => { r._idx = i; });
+  state.visibleRows = visible;
+  const rowsHtml = visible.map((r, i) => renderRow(r, i)).join("");
+  const tail = filtered.length > 500
+    ? `<tr><td colspan="6" class="px-3 py-3 text-center text-zinc-500 text-xs">Показано 500 из ${filtered.length} — уточните фильтр.</td></tr>`
+    : "";
+  return `
+    <section class="bg-bg-card border border-border rounded-lg overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          ${TABLE_HEAD_HTML}
+          <tbody class="divide-y divide-border/50">${rowsHtml}${tail}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderGroupedTable(filtered) {
+  // Bucket by category.
+  const byCategory = new Map();
+  for (const r of filtered) {
+    if (!byCategory.has(r.category)) byCategory.set(r.category, []);
+    byCategory.get(r.category).push(r);
+  }
+  // Each group's rows are pre-sorted by the user's `sort` choice already
+  // (applyFilters does it). Sort the GROUPS by best APR descending so the
+  // most attractive strategy band lands at the top.
+  const groups = [...byCategory.entries()]
+    .map(([cat, rows]) => ({
+      cat,
+      rows,
+      bestApr: rows.length > 0 ? Math.max(...rows.map(r => r.apr)) : 0,
+    }))
+    .sort((a, b) => b.bestApr - a.bestApr);
+
+  // Index continues across all groups so click handlers stay flat.
+  state.visibleRows = [];
+  let globalIdx = 0;
+  const sections = groups.map(g => {
+    const meta = CATEGORY_DESCRIPTIONS[g.cat] ?? { emoji: "📊", title: g.cat, desc: "" };
+    const collapsed = state.collapsedGroups.has(g.cat);
+    const showAll = state.showAllGroups.has(g.cat);
+    const limit = collapsed ? 0 : (showAll ? g.rows.length : GROUP_DEFAULT_LIMIT);
+    const visible = g.rows.slice(0, limit);
+
+    // Stamp visible rows and append to global array
+    const startIdx = globalIdx;
+    visible.forEach((r) => {
+      r._idx = globalIdx++;
+      state.visibleRows.push(r);
+    });
+
+    const headerHtml = `
+      <div class="group-header" data-toggle-group="${escapeHtml(g.cat)}">
+        <span class="group-emoji">${meta.emoji}</span>
+        <div class="group-title-block">
+          <h3 class="group-title">${escapeHtml(meta.title)}</h3>
+          <p class="group-desc">${escapeHtml(meta.desc)}</p>
+        </div>
+        <div class="group-stats">
+          <div class="group-best-apr ${aprColourClass(g.bestApr)}">${g.bestApr.toFixed(2)}%</div>
+          <div class="group-count">${g.rows.length} ${pluralRu(g.rows.length, "рынок", "рынка", "рынков")}</div>
+        </div>
+        <span class="group-toggle">${collapsed ? "▶" : "▼"}</span>
+      </div>
+    `;
+
+    if (collapsed) {
+      return `<section class="bg-bg-card border border-border rounded-lg overflow-hidden">${headerHtml}</section>`;
+    }
+
+    const rowsHtml = visible.map((r) => renderRow(r, r._idx)).join("");
+    const hasMore = g.rows.length > limit;
+    const showAllBtn = hasMore
+      ? `<button class="show-all-btn" data-show-all-group="${escapeHtml(g.cat)}">Показать все ${g.rows.length}</button>`
+      : (showAll && g.rows.length > GROUP_DEFAULT_LIMIT
+          ? `<button class="show-all-btn" data-hide-extra-group="${escapeHtml(g.cat)}">Свернуть до ${GROUP_DEFAULT_LIMIT}</button>`
+          : "");
+
+    return `
+      <section class="bg-bg-card border border-border rounded-lg overflow-hidden">
+        ${headerHtml}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            ${TABLE_HEAD_HTML}
+            <tbody class="divide-y divide-border/50">${rowsHtml}</tbody>
+          </table>
+        </div>
+        ${showAllBtn}
+      </section>
+    `;
+  });
+
+  return sections.join("");
+}
+
+// Russian noun plural (1 рынок / 2-4 рынка / 5+ рынков).
+function pluralRu(n, one, few, many) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
+}
+
+function wireGroupListeners() {
+  els.rows.querySelectorAll("[data-toggle-group]").forEach(el => {
+    el.addEventListener("click", e => {
+      // Avoid swallowing clicks on the show-all-btn rendered near the header
+      if (e.target.closest(".show-all-btn")) return;
+      const cat = el.dataset.toggleGroup;
+      if (!cat) return;
+      if (state.collapsedGroups.has(cat)) state.collapsedGroups.delete(cat);
+      else state.collapsedGroups.add(cat);
+      render();
+    });
+  });
+  els.rows.querySelectorAll("[data-show-all-group]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const cat = btn.dataset.showAllGroup;
+      state.showAllGroups.add(cat);
+      render();
+    });
+  });
+  els.rows.querySelectorAll("[data-hide-extra-group]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const cat = btn.dataset.hideExtraGroup;
+      state.showAllGroups.delete(cat);
+      render();
+    });
+  });
+}
+
 function render() {
   const filtered = applyFilters(state.rows);
 
@@ -1850,49 +2081,19 @@ function render() {
     els.sum.sources.textContent = `${uniqueSources.size} источников`;
   }
 
-  // Table
+  // Table / Groups
   if (filtered.length === 0) {
-    els.rows.innerHTML = `<tr><td colspan="6" class="px-3 py-8 text-center text-zinc-500">Под фильтры ничего не подошло.</td></tr>`;
+    els.rows.innerHTML = `<div class="bg-bg-card border border-border rounded-lg px-3 py-8 text-center text-zinc-500">Под фильтры ничего не подошло.</div>`;
+    state.visibleRows = [];
   } else {
-    state.visibleRows = filtered.slice(0, 500);
-    // Stamp each row with its visible index so the calc panel can look it up
-    // by data-attribute later.
-    state.visibleRows.forEach((r, i) => { r._idx = i; });
-    const html = state.visibleRows.map((r, i) => {
-      const cat = CATEGORY_LABELS[r.category] ?? { label: r.category, badge: "" };
-      const colour = aprColourClass(r.apr);
-      const rowOpacity = r.liquid === false ? "opacity-70" : "";
-      const marketBadge = r.liquid === false
-        ? `<span class="ml-1 text-[10px] text-amber-400/70" title="Тонкий рынок — APR быстро меняется">●</span>`
-        : "";
-      const expanded = state.expandedRowIndex === i;
-      const change = aprChange(r);
-      const arrow = change.direction === "up"
-        ? `<span class="apr-up" title="+${change.delta.toFixed(2)}% с прошлого обновления">▲</span>`
-        : change.direction === "down"
-          ? `<span class="apr-down" title="${change.delta.toFixed(2)}% с прошлого обновления">▼</span>`
-          : "";
-      const star = isWatched(r)
-        ? `<button class="star-btn star-on" data-watch-row="${i}" aria-label="Убрать из избранного">★</button>`
-        : `<button class="star-btn" data-watch-row="${i}" aria-label="В избранное">☆</button>`;
-      return `
-        <tr class="data-row ${rowOpacity} ${expanded ? "expanded" : ""}" data-row-index="${i}">
-          <td class="px-3 py-2 text-zinc-300">${star}${escapeHtml(r.source)}</td>
-          <td class="px-3 py-2 font-mono text-xs text-zinc-100">${escapeHtml(r.market)}${r.quote ? `<span class="text-zinc-500">/${escapeHtml(r.quote)}</span>` : ""}${marketBadge}</td>
-          <td class="px-3 py-2 hidden sm:table-cell"><span class="badge ${cat.badge}">${cat.label}</span></td>
-          <td class="px-3 py-2 text-right font-mono ${colour}">${arrow}${fmtApr(r.apr)}</td>
-          <td class="px-3 py-2 hidden md:table-cell text-zinc-400 text-xs">${r.fixed ? "фикс" : "плав"}</td>
-          <td class="px-3 py-2 hidden lg:table-cell text-zinc-500 text-xs">${escapeHtml(r.note ?? "")}</td>
-        </tr>
-        ${expanded ? `<tr class="calc-row"><td colspan="6">${renderCalculator(r)}</td></tr>` : ""}
-      `;
-    }).join("");
-    els.rows.innerHTML = html;
-    if (filtered.length > 500) {
-      els.rows.insertAdjacentHTML("beforeend",
-        `<tr><td colspan="6" class="px-3 py-3 text-center text-zinc-500 text-xs">Показано 500 из ${filtered.length} — уточните фильтр, чтобы увидеть больше.</td></tr>`);
-    }
+    // When the user picked a specific category in the filter, the group view
+    // is redundant — render a flat table inside one card.
+    const usingFlatView = !!state.filters.category;
+    els.rows.innerHTML = usingFlatView
+      ? renderFlatTable(filtered)
+      : renderGroupedTable(filtered);
     wireCalculatorListeners();
+    wireGroupListeners();
   }
 
   // Errors panel

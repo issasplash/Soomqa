@@ -542,6 +542,75 @@ tbody tr.data-row.expanded {
   font-style: italic;
 }
 
+/* Category group header */
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(124, 92, 255, 0.05);
+  border-bottom: 1px solid #252533;
+  transition: background-color 0.15s ease;
+}
+.group-header:hover { background: rgba(124, 92, 255, 0.10); }
+.group-emoji {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.group-title-block {
+  flex: 1;
+  min-width: 0;
+}
+.group-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.2;
+  margin: 0;
+}
+.group-desc {
+  font-size: 11px;
+  color: #8a92a6;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.group-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  text-align: right;
+}
+.group-best-apr {
+  font-family: ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 600;
+}
+.group-count {
+  font-size: 11px;
+  color: #6b7280;
+}
+.group-toggle {
+  color: #8a92a6;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.show-all-btn {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-top: 1px solid #252533;
+  color: #a394ff;
+  font-size: 12px;
+  padding: 10px;
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+}
+.show-all-btn:hover { background: rgba(124, 92, 255, 0.08); color: #fff; }
+
 /* Disabled button state — keeps loading state visually distinct */
 button:disabled {
   opacity: 0.6;
