@@ -1743,10 +1743,51 @@ function renderCalculator(row) {
       ${verdict}
       ${baselineBlock}
       ${renderHistorySection(row)}
+      ${renderBacktestBlock(row, amount)}
       <div class="recommendation-slot" data-rec-for="${row._idx}">
         ${renderRecommendationFromCache(row, amount, breakDays)}
       </div>
       <div class="calc-formula">${variableNote}</div>
+    </div>
+  `;
+}
+
+// ─── Backtest — "what would $X have earned in this row over the last N days?"
+//
+// Uses cached history points (the same data the sparkline draws). Computes
+// daily yield = (avg APR in window) × days / 365 × amount − fees(amount).
+// Caveats: linear, ignores compound; fine for directional intuition.
+function renderBacktestBlock(row, amount) {
+  if (amount <= 0) return "";
+  const period = selectedPeriodFor(row);
+  const cached = historyCache?.get?.(historyCacheKey(row, period));
+  if (!cached || cached.points.length < 3) return "";
+  const stats = statsFromPoints(cached.points);
+  if (!stats) return "";
+
+  const days = period;
+  const apr = stats.avg / 100;
+  const grossIfHeldThroughout = amount * apr * (days / 365);
+  const fees = feesForCategory(row.category, amount);
+  const net = grossIfHeldThroughout - fees;
+  const isProfit = net > 0;
+
+  return `
+    <div class="backtest-block">
+      <div class="backtest-title">⏪ Бэктест: что было бы при заходе ${period} дн назад?</div>
+      <div class="backtest-row">
+        <span class="backtest-label">Капитал:</span>
+        <span class="backtest-val">$${amount.toFixed(0)}</span>
+        <span class="backtest-label">Средний APR за период:</span>
+        <span class="backtest-val">${stats.avg.toFixed(2)}%</span>
+      </div>
+      <div class="backtest-row">
+        <span class="backtest-label">Заработал бы:</span>
+        <span class="backtest-val ${isProfit ? "pos" : "neg"}">${net >= 0 ? "+" : "−"}$${Math.abs(net).toFixed(2)}</span>
+        <span class="backtest-label">Реализованный APY:</span>
+        <span class="backtest-val ${isProfit ? "pos" : "neg"}">${((net / amount) * (365 / days) * 100).toFixed(1)}%</span>
+      </div>
+      <p class="backtest-caveat">Расчёт линейный (gross = amount × avg APR × days/365 − fees). Реальная доходность зависит от compound, момента входа и точной траектории ставки. Это историческая «что было бы» оценка, не гарантия будущего.</p>
     </div>
   `;
 }
@@ -1857,6 +1898,18 @@ function wireCalculatorListeners() {
       render();
     });
   });
+  els.rows.querySelectorAll(".compare-box").forEach(box => {
+    box.addEventListener("click", e => e.stopPropagation());
+    box.addEventListener("change", e => {
+      const idx = Number(box.dataset.compareIdx);
+      const r = state.visibleRows[idx];
+      if (!r) return;
+      const k = rowKey(r);
+      if (box.checked) compareSelection.add(k);
+      else compareSelection.delete(k);
+      refreshCompareToolbar();
+    });
+  });
   // "+ В позиции" button — captures the current calculator amount into a
   // persistent position record. Stops click propagation so the row doesn't
   // collapse the calculator panel we're standing inside.
@@ -1956,9 +2009,11 @@ function renderRow(r, i) {
   const riskCls = riskColourClass(risk);
   const riskTitle = ["низкий","умеренный","средний","повышенный","высокий"][risk-1];
   const riskDot = `<span class="risk-dot ${riskCls}" title="Риск: ${riskTitle} (${risk}/5)"></span>`;
+  const selected = compareSelection.has(rowKey(r));
+  const compareBox = `<input type="checkbox" class="compare-box" data-compare-idx="${i}" ${selected ? "checked" : ""} title="Добавить в сравнение" />`;
   return `
     <tr class="data-row ${rowOpacity} ${expanded ? "expanded" : ""}" data-row-index="${i}">
-      <td class="px-3 py-2 text-zinc-300">${star}${escapeHtml(r.source)}</td>
+      <td class="px-3 py-2 text-zinc-300">${compareBox}${star}${escapeHtml(r.source)}</td>
       <td class="px-3 py-2 font-mono text-xs text-zinc-100">${escapeHtml(r.market)}${r.quote ? `<span class="text-zinc-500">/${escapeHtml(r.quote)}</span>` : ""}${marketBadge}</td>
       <td class="px-3 py-2 hidden sm:table-cell"><span class="badge ${cat.badge}">${cat.label}</span></td>
       <td class="px-3 py-2 text-right font-mono ${colour}"><span class="apr-cell">${riskDot}${arrow}${fmtApr(r.apr)}</span></td>
@@ -2410,6 +2465,133 @@ function applyPreset(name) {
 document.querySelectorAll(".preset-btn[data-preset]").forEach(btn => {
   btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
 });
+
+// ─── Side-by-side compare panel ───────────────────────────────────────────────
+
+const compareSelection = new Set();  // rowKey strings
+
+function refreshCompareToolbar() {
+  const openBtn = document.getElementById("compare-open");
+  const clearBtn = document.getElementById("compare-clear");
+  const countEl = document.getElementById("compare-count");
+  if (!openBtn) return;
+  if (compareSelection.size > 0) {
+    openBtn.classList.remove("hidden");
+    clearBtn.classList.remove("hidden");
+    countEl.textContent = String(compareSelection.size);
+  } else {
+    openBtn.classList.add("hidden");
+    clearBtn.classList.add("hidden");
+  }
+}
+
+function renderComparePanel() {
+  const panel = document.getElementById("compare-panel");
+  const content = document.getElementById("compare-content");
+  if (!panel || !content) return;
+
+  const selected = state.rows.filter(r => compareSelection.has(rowKey(r)));
+  if (selected.length === 0) {
+    panel.classList.add("hidden");
+    return;
+  }
+
+  // Use the largest amount from any open calculator state — fallback $500.
+  const amount = 500;
+
+  const horizons = [
+    { label: "1 день", days: 1 },
+    { label: "1 неделя", days: 7 },
+    { label: "1 месяц", days: 30 },
+    { label: "1 год", days: 365 },
+  ];
+
+  let html = `<table class="compare-table"><thead><tr><th>Метрика</th>`;
+  for (const r of selected) {
+    html += `<th>${escapeHtml(r.source)}<br><span class="text-zinc-500">${escapeHtml(r.market)}</span></th>`;
+  }
+  html += `</tr></thead><tbody>`;
+
+  // APR row
+  html += `<tr><td>APR</td>`;
+  for (const r of selected) {
+    html += `<td class="num ${aprColourClass(r.apr)}">${fmtApr(r.apr)}</td>`;
+  }
+  html += `</tr>`;
+
+  // Category
+  html += `<tr><td>Категория</td>`;
+  for (const r of selected) {
+    const cat = CATEGORY_LABELS[r.category] ?? { label: r.category, badge: "" };
+    html += `<td><span class="badge ${cat.badge}">${cat.label}</span></td>`;
+  }
+  html += `</tr>`;
+
+  // Risk
+  html += `<tr><td>Риск</td>`;
+  for (const r of selected) {
+    const risk = riskScoreFor(r);
+    html += `<td><span class="risk-dot ${riskColourClass(risk)}"></span> ${risk}/5</td>`;
+  }
+  html += `</tr>`;
+
+  // Liquid
+  html += `<tr><td>Ликвидный</td>`;
+  for (const r of selected) {
+    html += `<td>${r.liquid ? "✓" : "✗"}</td>`;
+  }
+  html += `</tr>`;
+
+  // Fees
+  html += `<tr><td>Fees on $${amount}</td>`;
+  for (const r of selected) {
+    html += `<td class="num">$${feesForCategory(r.category, amount).toFixed(2)}</td>`;
+  }
+  html += `</tr>`;
+
+  // Horizon net APY projections
+  for (const h of horizons) {
+    html += `<tr><td>${h.label}: net $</td>`;
+    for (const r of selected) {
+      const proj = projectAt(r, amount, h.days);
+      html += `<td class="num ${proj.isProfit ? "pos" : "neg"}">${proj.net >= 0 ? "+" : "−"}$${Math.abs(proj.net).toFixed(2)}</td>`;
+    }
+    html += `</tr>`;
+  }
+
+  // Break-even
+  html += `<tr><td>Break-even</td>`;
+  for (const r of selected) {
+    const days = breakEvenDays(r, amount);
+    html += `<td class="num">${days == null ? "—" : formatDuration(days, r)}</td>`;
+  }
+  html += `</tr>`;
+
+  html += `</tbody></table>`;
+  html += `<p class="text-[11px] text-zinc-500 mt-3">Базовая сумма $${amount}. Открой строку в таблице для калькулятора с твоей суммой и горизонтами.</p>`;
+  content.innerHTML = html;
+  panel.classList.remove("hidden");
+}
+
+const compareOpenBtn = document.getElementById("compare-open");
+const compareCloseBtn = document.getElementById("compare-close");
+const compareClearBtn = document.getElementById("compare-clear");
+if (compareOpenBtn) {
+  compareOpenBtn.addEventListener("click", renderComparePanel);
+}
+if (compareCloseBtn) {
+  compareCloseBtn.addEventListener("click", () => {
+    document.getElementById("compare-panel")?.classList.add("hidden");
+  });
+}
+if (compareClearBtn) {
+  compareClearBtn.addEventListener("click", () => {
+    compareSelection.clear();
+    refreshCompareToolbar();
+    document.getElementById("compare-panel")?.classList.add("hidden");
+    render();
+  });
+}
 
 // ─── Heatmap: exchanges (rows) × symbols (cols) → APR colour cells ───────────
 
