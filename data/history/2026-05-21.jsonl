@@ -867,3 +867,5 @@
 {"t":1779404055330,"k":"Pendle|MSY|fixed-yield","apr":11.7008,"liq":1}
 {"t":1779404055330,"k":"Pendle|MSY|fixed-yield","apr":12.2813,"liq":1}
 {"t":1779404055330,"k":"Ethena|SUSDE|delta-neutral","apr":4.2827,"liq":1}
+{"t":1779407211424,"k":"Hyperliquid|XMR|funding-rate","apr":254.8329,"liq":1}
+{"t":1779407211424,"k":"Hyperliquid|CHIP|funding-rate","apr":-242.4228,"liq":1}
