@@ -926,3 +926,98 @@
 {"t":1779561519304,"k":"Pendle|SRUSDE|fixed-yield","apr":4.2625,"liq":1}
 {"t":1779561519304,"k":"Pendle|SRUSDE|fixed-yield","apr":4.7868,"liq":1}
 {"t":1779561519304,"k":"Ethena|SUSDE|delta-neutral","apr":4.2559,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|BTC|funding-rate","apr":-1.5587,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|ETH|funding-rate","apr":-2.6587,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|SOL|funding-rate","apr":-2.4115,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|AVAX|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|BNB|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|LTC|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|ARB|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|DOGE|funding-rate","apr":7.4678,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|SUI|funding-rate","apr":4.0818,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|kPEPE|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|CRV|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|LDO|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|LINK|funding-rate","apr":0.7619,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|XRP|funding-rate","apr":3.6232,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|BCH|funding-rate","apr":-33.9282,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|AAVE|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|WLD|funding-rate","apr":14.2924,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|TRX|funding-rate","apr":9.3621,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|UNI|funding-rate","apr":-11.0916,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|ZRO|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|ADA|funding-rate","apr":-25.8157,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|TON|funding-rate","apr":4.3761,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|PENDLE|funding-rate","apr":0.9293,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|FET|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|NEAR|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|kBONK|funding-rate","apr":10.0343,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|JUP|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|WIF|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|ONDO|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|TAO|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|ENA|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|HBAR|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|GRASS|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|HYPE|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|VIRTUAL|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|PENGU|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|FARTCOIN|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|MORPHO|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|TRUMP|funding-rate","apr":-5.0585,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|VVV|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|PAXG|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|PUMP|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|XPL|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|WLFI|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|ASTER|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|ZEC|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|MON|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|MEGA|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|CC|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|AERO|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|LIT|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|XMR|funding-rate","apr":10.95,"liq":1}
+{"t":1779565592995,"k":"Hyperliquid|CHIP|funding-rate","apr":-10.2051,"liq":1}
+{"t":1779565592995,"k":"Aave v3|USDE|stable-lending","apr":0.0081,"liq":1}
+{"t":1779565592995,"k":"Aave v3|USDT|stable-lending","apr":2.6641,"liq":1}
+{"t":1779565592995,"k":"Aave v3|SUSDE|stable-lending","apr":3.3855,"liq":1}
+{"t":1779565592995,"k":"Aave v3|SUSDE|stable-lending","apr":2.3986,"liq":1}
+{"t":1779565592995,"k":"Aave v3|USDC|stable-lending","apr":3.7187,"liq":1}
+{"t":1779565592995,"k":"Aave v3|USDE|stable-lending","apr":4.7982,"liq":1}
+{"t":1779565592995,"k":"Aave v3|SGHO|stable-lending","apr":4.25,"liq":1}
+{"t":1779565592995,"k":"Aave v3|SGHO|stable-lending","apr":3.75,"liq":1}
+{"t":1779565592995,"k":"Morpho Blue|STEAKUSDC|stable-lending","apr":4.2502,"liq":1}
+{"t":1779565592995,"k":"Morpho Blue|GTUSDCP|stable-lending","apr":4.2502,"liq":1}
+{"t":1779565592995,"k":"Morpho Blue|STEAKUSDC|stable-lending","apr":3.421,"liq":1}
+{"t":1779565592995,"k":"Morpho Blue|SENPYUSD|stable-lending","apr":2.847,"liq":1}
+{"t":1779565592995,"k":"Morpho Blue|SENPYUSDMAIN|stable-lending","apr":6.4993,"liq":1}
+{"t":1779565592995,"k":"Morpho Blue|STEAKUSDC|stable-lending","apr":4.1977,"liq":1}
+{"t":1779565592995,"k":"Morpho Blue|STEAKUSDC|stable-lending","apr":4.2695,"liq":1}
+{"t":1779565592995,"k":"Morpho Blue|STEAKUSDTBETHENA|stable-lending","apr":4.9796,"liq":1}
+{"t":1779565592995,"k":"Sky sUSDS|SUSDS|stable-lending","apr":3.65,"liq":1}
+{"t":1779565592995,"k":"Sky sUSDS|SUSDS|stable-lending","apr":3.65,"liq":1}
+{"t":1779565592995,"k":"Sky sUSDS|SDAI|stable-lending","apr":1.25,"liq":1}
+{"t":1779565592995,"k":"Pendle|USDG|fixed-yield","apr":3.5069,"liq":1}
+{"t":1779565592995,"k":"Pendle|USDG|fixed-yield","apr":4.8526,"liq":1}
+{"t":1779565592995,"k":"Pendle|USDAI|fixed-yield","apr":6.8068,"liq":1}
+{"t":1779565592995,"k":"Pendle|USDAI|fixed-yield","apr":1.177,"liq":1}
+{"t":1779565592995,"k":"Pendle|APXUSD|fixed-yield","apr":3.6447,"liq":1}
+{"t":1779565592995,"k":"Pendle|APXUSD|fixed-yield","apr":10.0547,"liq":1}
+{"t":1779565592995,"k":"Pendle|SNUSD|fixed-yield","apr":8.5409,"liq":1}
+{"t":1779565592995,"k":"Pendle|SNUSD|fixed-yield","apr":6.6189,"liq":1}
+{"t":1779565592995,"k":"Pendle|USDAT|fixed-yield","apr":9.3689,"liq":1}
+{"t":1779565592995,"k":"Pendle|USDAT|fixed-yield","apr":5.2682,"liq":1}
+{"t":1779565592995,"k":"Pendle|SIERRA|fixed-yield","apr":10.3074,"liq":1}
+{"t":1779565592995,"k":"Pendle|SIERRA|fixed-yield","apr":8.7694,"liq":1}
+{"t":1779565592995,"k":"Pendle|APYUSD|fixed-yield","apr":16.442,"liq":1}
+{"t":1779565592995,"k":"Pendle|APYUSD|fixed-yield","apr":15.5122,"liq":1}
+{"t":1779565592995,"k":"Pendle|SUSDE|fixed-yield","apr":4.5369,"liq":1}
+{"t":1779565592995,"k":"Pendle|SUSDE|fixed-yield","apr":4.2414,"liq":1}
+{"t":1779565592995,"k":"Pendle|SUSDAI|fixed-yield","apr":9.6041,"liq":1}
+{"t":1779565592995,"k":"Pendle|SUSDAI|fixed-yield","apr":8.0382,"liq":1}
+{"t":1779565592995,"k":"Pendle|SUSDAT|fixed-yield","apr":12.4624,"liq":1}
+{"t":1779565592995,"k":"Pendle|SUSDAT|fixed-yield","apr":4.2893,"liq":1}
+{"t":1779565592995,"k":"Pendle|SRUSDE|fixed-yield","apr":4.2669,"liq":1}
+{"t":1779565592995,"k":"Pendle|SRUSDE|fixed-yield","apr":4.7868,"liq":1}
+{"t":1779565592995,"k":"Ethena|SUSDE|delta-neutral","apr":3.7213,"liq":1}
