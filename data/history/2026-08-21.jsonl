@@ -753,3 +753,8 @@
 {"t":1787315303553,"k":"Pendle|SUSDAI|fixed-yield","apr":10.0379,"liq":1}
 {"t":1787315303553,"k":"Pendle|SUSDAI|fixed-yield","apr":8.5599,"liq":1}
 {"t":1787315303553,"k":"Ethena|SUSDE|delta-neutral","apr":4.5779,"liq":1}
+{"t":1787318733573,"k":"Hyperliquid|ZRO|funding-rate","apr":123.2062,"liq":1}
+{"t":1787318733573,"k":"Hyperliquid|FET|funding-rate","apr":105.558,"liq":1}
+{"t":1787318733573,"k":"Hyperliquid|EIGEN|funding-rate","apr":70.0229,"liq":1}
+{"t":1787318733573,"k":"Hyperliquid|XMR|funding-rate","apr":246.1678,"liq":1}
+{"t":1787318733573,"k":"Morpho Blue|SPARKUSDC|stable-lending","apr":3.706,"liq":1}
