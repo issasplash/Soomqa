@@ -1563,3 +1563,13 @@
 {"t":1787423272824,"k":"Cross-exchange|XRP|cross-exchange-spread","apr":21.8255,"liq":1}
 {"t":1787423272824,"k":"Cross-exchange|ZEC|cross-exchange-spread","apr":86.6774,"liq":1}
 {"t":1787423272824,"k":"Cross-exchange|ZRO|cross-exchange-spread","apr":113.0545,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|LINK|funding-rate","apr":66.0296,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|TRX|funding-rate","apr":57.3338,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|UNI|funding-rate","apr":91.9525,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|FET|funding-rate","apr":42.0153,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|TAO|funding-rate","apr":10.95,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|BOME|funding-rate","apr":17.6063,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|ENA|funding-rate","apr":71.5184,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|TRUMP|funding-rate","apr":25.1816,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|ZEC|funding-rate","apr":40.3574,"liq":1}
+{"t":1787426344084,"k":"Hyperliquid|XMR|funding-rate","apr":43.6701,"liq":1}
