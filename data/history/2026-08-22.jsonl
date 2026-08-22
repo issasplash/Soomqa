@@ -331,3 +331,9 @@
 {"t":1787365730200,"k":"Cross-exchange|XRP|cross-exchange-spread","apr":72.0282,"liq":1}
 {"t":1787365730200,"k":"Cross-exchange|ZEC|cross-exchange-spread","apr":79.7982,"liq":1}
 {"t":1787365730200,"k":"Cross-exchange|ZRO|cross-exchange-spread","apr":173.7726,"liq":1}
+{"t":1787368864198,"k":"Hyperliquid|TRX|funding-rate","apr":222.9115,"liq":1}
+{"t":1787368864198,"k":"Hyperliquid|kSHIB|funding-rate","apr":24.4169,"liq":1}
+{"t":1787368864198,"k":"Hyperliquid|FET|funding-rate","apr":197.8725,"liq":1}
+{"t":1787368864198,"k":"Hyperliquid|JUP|funding-rate","apr":177.0439,"liq":1}
+{"t":1787368864198,"k":"Hyperliquid|TAO|funding-rate","apr":185.1397,"liq":1}
+{"t":1787368864198,"k":"Hyperliquid|GRASS|funding-rate","apr":199.9147,"liq":1}
