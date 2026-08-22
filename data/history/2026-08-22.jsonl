@@ -487,3 +487,10 @@
 {"t":1787374921346,"k":"Pendle|SUSDAI|fixed-yield","apr":10.205,"liq":1}
 {"t":1787374921346,"k":"Pendle|SUSDAI|fixed-yield","apr":8.6182,"liq":1}
 {"t":1787374921346,"k":"Ethena|SUSDE|delta-neutral","apr":4.4611,"liq":1}
+{"t":1787376844595,"k":"Hyperliquid|LINK|funding-rate","apr":268.1582,"liq":1}
+{"t":1787376844595,"k":"Hyperliquid|TRX|funding-rate","apr":138.5106,"liq":1}
+{"t":1787376844595,"k":"Hyperliquid|WIF|funding-rate","apr":138.551,"liq":1}
+{"t":1787376844595,"k":"Hyperliquid|ENA|funding-rate","apr":86.6255,"liq":1}
+{"t":1787376844595,"k":"Hyperliquid|PURR|funding-rate","apr":47.0194,"liq":1}
+{"t":1787376844595,"k":"Hyperliquid|VVV|funding-rate","apr":47.0627,"liq":1}
+{"t":1787376844595,"k":"Hyperliquid|AERO|funding-rate","apr":26.4477,"liq":1}
