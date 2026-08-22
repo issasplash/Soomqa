@@ -409,3 +409,11 @@
 {"t":1787371190857,"k":"Pendle|SUSDAI|fixed-yield","apr":10.2136,"liq":1}
 {"t":1787371190857,"k":"Pendle|SUSDAI|fixed-yield","apr":8.6183,"liq":1}
 {"t":1787371190857,"k":"Ethena|SUSDE|delta-neutral","apr":4.0552,"liq":1}
+{"t":1787373291195,"k":"Hyperliquid|ARB|funding-rate","apr":10.95,"liq":1}
+{"t":1787373291195,"k":"Hyperliquid|kSHIB|funding-rate","apr":10.95,"liq":1}
+{"t":1787373291195,"k":"Hyperliquid|UNI|funding-rate","apr":126.2358,"liq":1}
+{"t":1787373291195,"k":"Hyperliquid|FET|funding-rate","apr":199.2966,"liq":1}
+{"t":1787373291195,"k":"Hyperliquid|TAO|funding-rate","apr":168.6898,"liq":1}
+{"t":1787373291195,"k":"Hyperliquid|GRASS|funding-rate","apr":139.8399,"liq":1}
+{"t":1787373291195,"k":"Hyperliquid|TRUMP|funding-rate","apr":307.4559,"liq":1}
+{"t":1787373291195,"k":"Hyperliquid|XMR|funding-rate","apr":202.7403,"liq":1}
