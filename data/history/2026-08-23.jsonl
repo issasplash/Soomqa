@@ -1526,3 +1526,5 @@
 {"t":1787525616529,"k":"Pendle|SUSDAI|fixed-yield","apr":10.4506,"liq":1}
 {"t":1787525616529,"k":"Pendle|SUSDAI|fixed-yield","apr":8.7013,"liq":1}
 {"t":1787525616529,"k":"Ethena|SUSDE|delta-neutral","apr":4.0658,"liq":1}
+{"t":1787527907401,"k":"Hyperliquid|GRASS|funding-rate","apr":127.0279,"liq":1}
+{"t":1787527907401,"k":"Hyperliquid|PURR|funding-rate","apr":22.0824,"liq":1}
